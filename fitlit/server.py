@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-from fitlit import config, orchestrator, ratelimit
+from fitlit import config, orchestrator, ratelimit, storage
 from fitlit.client import MissingTokenError
 from fitlit.fetchers.base import fetch_once
 
@@ -101,7 +101,7 @@ def root() -> dict:
         "scheduler_running": _scheduler_alive(),
         "tick_seconds": config.TICK_SECONDS,
         "fetchers": list(config.FETCHERS),
-        "endpoints": ["/health", "/ready", "/fetchers", "/status", "/fetchers/{name}/run"],
+        "endpoints": ["/health", "/ready", "/fetchers", "/status", "/stats", "/fetchers/{name}/run"],
     }
 
 
@@ -125,6 +125,12 @@ def status() -> dict:
         "rate_limit": ratelimit.snapshot(),
         "fetchers": orchestrator.schedule_status(),
     }
+
+
+@app.get("/stats")
+def stats() -> dict:
+    """Stored row counts per data type per fetcher database."""
+    return {"databases": storage.stats()}
 
 
 @app.post("/fetchers/{name}/run")

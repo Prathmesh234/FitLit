@@ -34,14 +34,17 @@ def fetch_once(name: str) -> dict:
              name, len(fetcher.data_types), fetcher.interval_seconds)
 
     client = GoogleHealthClient(name)
-    fetched = 0
+    succeeded = 0
+    stored = 0
     for data_type in fetcher.data_types:
-        if client.list_data_points(data_type) is not None:
-            fetched += 1
+        result = client.list_data_points(data_type)
+        if result is not None:
+            succeeded += 1
+            stored += result
 
     total = len(fetcher.data_types)
-    log.info("[%s] done — %d/%d data types fetched", name, fetched, total)
-    return {"fetcher": name, "fetched": fetched, "total": total}
+    log.info("[%s] done — %d/%d data types ok, %d points stored", name, succeeded, total, stored)
+    return {"fetcher": name, "data_types_ok": succeeded, "data_types": total, "points_stored": stored}
 
 
 def run_fetcher(name: str) -> int:

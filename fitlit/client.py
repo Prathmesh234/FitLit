@@ -10,9 +10,11 @@ Responsibilities kept here so the fetchers stay trivial:
     * attach the OAuth Bearer token (assumed present, read from .env),
     * pass through the shared rate limiter before every call,
     * honour 429 / Retry-After with a bounded retry/backoff,
-    * persist each raw response under data/raw/<fetcher>/<dataType>/.
+    * follow pagination so a whole window is captured, and
+    * upsert every data point into the fetcher's SQLite database.
 
-Uses only the standard library (urllib) so it runs with no extra installs.
+Uses only the standard library for HTTP (urllib) plus our Pydantic/SQLite
+storage layer.
 """
 from __future__ import annotations
 
@@ -25,7 +27,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from fitlit import config, ratelimit
+from fitlit import config, ratelimit, storage
 
 log = logging.getLogger("fitlit.client")
 
@@ -53,11 +55,13 @@ class GoogleHealthClient:
         self.user = config.API_USER
 
     # ------------------------------------------------------------------ #
-    def list_data_points(self, data_type: str) -> dict | None:
-        """Fetch the available data points for a single data type.
+    def list_data_points(self, data_type: str) -> int | None:
+        """Fetch + persist every available data point for one data type.
 
-        Returns the parsed JSON body, or ``None`` if the call ultimately
-        failed (logged, never raised, so one bad type can't sink the sweep).
+        Follows ``nextPageToken`` so a whole window is captured, upserting each
+        page into the fetcher's SQLite database. Returns the number of points
+        stored, or ``None`` if the very first request failed (logged, never
+        raised, so one bad type can't sink the sweep).
         """
         if not self.token:
             raise MissingTokenError(
@@ -66,13 +70,30 @@ class GoogleHealthClient:
             )
 
         path = f"/v4/users/{urllib.parse.quote(self.user)}/dataTypes/{_camel_to_kebab(data_type)}/dataPoints"
-        query = urllib.parse.urlencode({"pageSize": config.PAGE_SIZE})
-        url = f"{config.BASE_URL}{path}?{query}"
+        base = f"{config.BASE_URL}{path}"
+        fetched_at = datetime.now(timezone.utc)
 
-        body = self._get_with_retry(url, data_type)
-        if body is not None:
-            self._persist(data_type, body)
-        return body
+        stored = 0
+        page_token: str | None = None
+        first = True
+        while True:
+            params = {"pageSize": config.PAGE_SIZE}
+            if page_token:
+                params["pageToken"] = page_token
+            body = self._get_with_retry(f"{base}?{urllib.parse.urlencode(params)}", data_type)
+            if body is None:
+                return None if first else stored
+            first = False
+
+            points = body.get("dataPoints") or []
+            stored += storage.store(self.fetcher_name, data_type, points, fetched_at)
+
+            page_token = body.get("nextPageToken")
+            if not page_token:
+                break
+
+        log.info("stored %-28s %d points", data_type, stored)
+        return stored
 
     # ------------------------------------------------------------------ #
     def _get_with_retry(self, url: str, data_type: str) -> dict | None:
@@ -88,9 +109,7 @@ class GoogleHealthClient:
             )
             try:
                 with urllib.request.urlopen(req, timeout=config.REQUEST_TIMEOUT) as resp:
-                    payload = json.loads(resp.read().decode("utf-8"))
-                    log.info("ok  %-28s %s", data_type, resp.status)
-                    return payload
+                    return json.loads(resp.read().decode("utf-8"))
             except urllib.error.HTTPError as exc:
                 if exc.code == 429 and attempt < _MAX_RETRIES:
                     wait = int(exc.headers.get("Retry-After") or _DEFAULT_BACKOFF)
@@ -103,10 +122,3 @@ class GoogleHealthClient:
                 log.error("net %-28s %s", data_type, exc)
                 return None
         return None
-
-    # ------------------------------------------------------------------ #
-    def _persist(self, data_type: str, body: dict) -> None:
-        out_dir = config.RAW_DIR / self.fetcher_name / data_type
-        out_dir.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-        (out_dir / f"{stamp}.json").write_text(json.dumps(body, indent=2))
