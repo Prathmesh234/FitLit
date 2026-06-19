@@ -16,7 +16,8 @@ often, and under which scopes.
 | 2. Research **every** Fitbit / Google Health API endpoint | ✅ done — see [`docs/fitbit-api-research.md`](docs/fitbit-api-research.md) |
 | 3. Design + build the cron fetcher | ✅ done — see [The fetcher](#the-fetcher) below |
 | 4. FastAPI server for 24/7 / container | ✅ done — see [The server](#the-server-247) below |
-| 5. Implement OAuth token refresh | ⬜ not started (paste a token into `.env` for now) |
+| 5. Pydantic models + SQLite persistence | ✅ done — see [Storage](#storage-pydantic--sqlite) below |
+| 6. Implement OAuth token refresh | ⬜ not started (paste a token into `.env` for now) |
 
 ## The fetcher
 
@@ -73,8 +74,53 @@ uv run python -m fitlit.orchestrator          # daemon
 uv run python -m fitlit.orchestrator --once   # single dispatch tick (testing)
 ```
 
-Pulled data lands in `data/raw/<fetcher>/<dataType>/<timestamp>.json`;
-scheduler + rate-limit state live in `data/state/` (both gitignored).
+Each fetcher upserts every pulled data point into **its own SQLite database**
+(see [Storage](#storage-pydantic--sqlite)); scheduler + rate-limit state live in
+`data/state/` (both gitignored).
+
+## Storage (Pydantic + SQLite)
+
+Every data point the Google Health API returns shares one envelope —
+`name` (a globally-unique id), a `dataSource`, and a type-specific `data` object
+that is one of four shapes (Interval / Sample / Daily / Session). The storage
+layer is built around that:
+
+```
+fitlit/models.py    Pydantic v2 models — the schema's single source of truth
+fitlit/storage.py   SQLite engine: db-per-fetcher, table-per-type, upsert
+```
+
+**Several databases — one per fetcher** (`data/db/<fetcher>.db`). Because each
+fetcher runs as its own process, separate files mean the eight cron scripts
+never contend on SQLite's single-writer lock. **One table per data type** inside
+each, with columns generated from the Pydantic model.
+
+Every row stores:
+
+* a **typed envelope** — `name` (PK), `start_time`/`end_time` + UTC offsets,
+  `recording_method`, `platform`, `device_name`, `update_time`, `fetched_at`;
+* **typed value columns** for the well-documented types (e.g. `steps.count`,
+  `heartRate.beats_per_minute`, `weight.weight_kg`, `exercise.*`) — int64 values
+  that the API sends as JSON strings are coerced automatically; and
+* **`data_json` + `raw_json`** — the full type object and the entire untouched
+  data point.
+
+That last pair is the **lifetime guarantee**: *no field is ever dropped*, even
+for data types we don't model with typed columns yet, or fields Google adds
+later. Typed columns are a convenience projection on top of complete raw capture.
+
+**Scale / dedup.** Writes are `INSERT … ON CONFLICT(name) DO UPDATE`, so polling
+the same window every 60s never duplicates — and an edited point (new
+`updateTime`) overwrites its row. Tables are indexed on `start_time` and
+`fetched_at` for time-range queries; databases use WAL mode. The fetcher follows
+`nextPageToken`, so a full window is captured, not just the first page.
+
+Inspect what's stored at `GET /stats` (row counts per type per database), or
+directly:
+
+```bash
+sqlite3 data/db/heart.db 'SELECT start_time, beats_per_minute FROM heartRate ORDER BY start_time DESC LIMIT 5;'
+```
 
 ## The server (24/7)
 
@@ -90,6 +136,7 @@ observability, and manual triggers.
 | GET | `/` | Service summary |
 | GET | `/fetchers` | List fetchers: cadence, scope, data types |
 | GET | `/status` | Scheduler state (per-fetcher next-due) + rate-limit budget |
+| GET | `/stats` | Stored row counts per data type per fetcher database |
 | POST | `/fetchers/{name}/run` | Fetch one fetcher right now, return a summary |
 
 ```bash

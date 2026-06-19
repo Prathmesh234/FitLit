@@ -17,8 +17,8 @@ venv/
 tokens.json
 credentials.json
 
-# FitLit runtime output (pulled data + scheduler/rate-limit state)
-data/raw/
+# FitLit runtime output (SQLite databases + scheduler/rate-limit state)
+data/db/
 data/state/
 
 # Editor / OS
