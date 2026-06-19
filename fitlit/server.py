@@ -148,7 +148,7 @@ async def run_fetcher_now(name: str) -> dict:
 def main() -> None:
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=config.HOST, port=config.PORT)
 
 
 if __name__ == "__main__":

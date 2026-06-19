@@ -21,8 +21,14 @@ from dataclasses import dataclass, field
 # Paths
 # --------------------------------------------------------------------------- #
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
-DATA_DIR = BASE_DIR / "data"
-CATALOG_PATH = DATA_DIR / "fitbit_endpoints.yaml"
+
+# The endpoint catalogue ships *inside* the image and never changes at runtime.
+CATALOG_PATH = BASE_DIR / "data" / "fitbit_endpoints.yaml"
+
+# Runtime data (SQLite DBs + scheduler/rate-limit state) is the part that must
+# survive restarts. In a container the filesystem is ephemeral, so point
+# FITLIT_DATA_DIR at a mounted volume / Azure Files share to persist it.
+DATA_DIR = pathlib.Path(os.environ.get("FITLIT_DATA_DIR", str(BASE_DIR / "data")))
 DB_DIR = DATA_DIR / "db"            # one SQLite database per fetcher
 STATE_DIR = DATA_DIR / "state"      # scheduler + rate-limiter bookkeeping
 SCHEDULE_STATE = STATE_DIR / "schedule.json"
@@ -78,6 +84,16 @@ TICK_SECONDS = int(_env("FITLIT_TICK_SECONDS", "10"))
 # background thread?  True for the single-container "web app runs everything"
 # model; set false to run the API and the orchestrator as separate processes.
 RUN_SCHEDULER = _env("FITLIT_RUN_SCHEDULER", "true").lower() in ("1", "true", "yes")
+
+# HTTP bind address. PORT follows the Azure convention (Container Apps / App
+# Service inject it); default 8000 for local use.
+HOST = _env("HOST", "0.0.0.0")
+PORT = int(_env("PORT", "8000"))
+
+# SQLite journal mode. WAL is best on a local disk. Over a network filesystem
+# (Azure Files / SMB) WAL's shared-memory locking is unsupported — set
+# FITLIT_SQLITE_JOURNAL=DELETE there.
+SQLITE_JOURNAL_MODE = _env("FITLIT_SQLITE_JOURNAL", "WAL")
 
 
 # --------------------------------------------------------------------------- #
