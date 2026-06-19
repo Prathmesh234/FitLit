@@ -13,6 +13,8 @@ venv/
 # Environment & secrets (OAuth tokens, client secrets)
 .env
 .env.*
+# the .env.example template is committed; it holds no secrets
+!.env.example
 *.secret
 tokens.json
 credentials.json
