@@ -155,8 +155,59 @@ docker run -p 8000:8000 -e GOOGLE_HEALTH_ACCESS_TOKEN=... \
   -v "$PWD/data:/app/data" fitlit
 ```
 
-The image's `HEALTHCHECK` hits `/health`; mount a volume at `/app/data` to keep
-pulled data and scheduler state across restarts.
+The image runs as a non-root user, respects `PORT` (default 8000), and its
+`HEALTHCHECK` hits `/health`. Runtime data (SQLite DBs + scheduler state) lives
+under `FITLIT_DATA_DIR` (default `/app/data`) — **mount a volume there to keep it
+across restarts**, because the container filesystem is ephemeral. The endpoint
+catalogue ships inside the image and is independent of that path.
+
+### Deploy to Azure Container Registry + Container Apps
+
+Azure runs `linux/amd64`, so build for that platform (required on an
+Apple-Silicon Mac):
+
+```bash
+# 1. Build for amd64 and push straight to ACR (ACR Tasks build remotely):
+az acr login --name <registry>
+az acr build --registry <registry> --image fitlit:latest --platform linux/amd64 .
+
+#    …or build locally and push:
+docker buildx build --platform linux/amd64 -t <registry>.azurecr.io/fitlit:latest --push .
+```
+
+Then deploy. **SQLite needs persistent storage** — back `/app/data` with an
+Azure Files share so a lifetime of data survives restarts/redeploys:
+
+```bash
+# 2. Create the Container Apps environment + an Azure Files storage mount
+az containerapp env create -g <rg> -n fitlit-env -l <region>
+az containerapp env storage set -g <rg> -n fitlit-env \
+  --storage-name fitlitdata --azure-file-account-name <acct> \
+  --azure-file-account-key <key> --azure-file-share-name fitlit --access-mode ReadWrite
+
+# 3. Create the app (single replica — it owns the schedule), token as a secret
+az containerapp create -g <rg> -n fitlit \
+  --environment fitlit-env \
+  --image <registry>.azurecr.io/fitlit:latest \
+  --registry-server <registry>.azurecr.io \
+  --target-port 8000 --ingress external \
+  --min-replicas 1 --max-replicas 1 \
+  --secrets ghtoken=<google-health-access-token> \
+  --env-vars GOOGLE_HEALTH_ACCESS_TOKEN=secretref:ghtoken FITLIT_DATA_DIR=/app/data
+# then attach the storage as a volume mounted at /app/data (via `az containerapp update --yaml`).
+```
+
+Two things that matter for correctness:
+
+* **Pin to a single replica** (`--min-replicas 1 --max-replicas 1`). The
+  scheduler runs in-process and owns the cadence; multiple replicas would
+  double-fetch. To scale the API horizontally later, run extra replicas with
+  `FITLIT_RUN_SCHEDULER=false` and keep exactly one scheduler.
+* **Use one Azure Files share** for the data volume so every fetcher's `.db`
+  file persists in the same place. If that share is **SMB**, also set
+  `FITLIT_SQLITE_JOURNAL=DELETE` — SQLite's default WAL mode needs shared-memory
+  locking that SMB doesn't support. (A premium **NFS** share, or a single
+  replica on local/ephemeral disk if you don't need persistence, can keep WAL.)
 
 ## ⚠️ Important: two APIs exist right now (June 2026)
 

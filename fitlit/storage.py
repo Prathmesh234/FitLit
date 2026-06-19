@@ -71,7 +71,8 @@ class Database:
         self.fetcher_name = fetcher_name
         config.DB_DIR.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path_for_fetcher(fetcher_name), timeout=30)
-        self.conn.execute("PRAGMA journal_mode=WAL")
+        # WAL on local disk; DELETE on a network mount (Azure Files / SMB).
+        self.conn.execute(f"PRAGMA journal_mode={config.SQLITE_JOURNAL_MODE}")
         self.conn.execute("PRAGMA synchronous=NORMAL")
         self.conn.execute("PRAGMA busy_timeout=30000")
         self._tables: set[str] = set()
