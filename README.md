@@ -17,7 +17,8 @@ often, and under which scopes.
 | 3. Design + build the cron fetcher | ✅ done — see [The fetcher](#the-fetcher) below |
 | 4. FastAPI server for 24/7 / container | ✅ done — see [The server](#the-server-247) below |
 | 5. Pydantic models + SQLite persistence | ✅ done — see [Storage](#storage-pydantic--sqlite) below |
-| 6. Implement OAuth token refresh | ⬜ not started (paste a token into `.env` for now) |
+| 6. Deploy + OAuth on a VM | ⬜ in progress — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
+| 7. Implement OAuth token refresh | ⬜ not started — [`docs/DEPLOYMENT.md` §4](docs/DEPLOYMENT.md) |
 
 ## The fetcher
 
