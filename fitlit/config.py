@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 CATALOG_PATH = DATA_DIR / "fitbit_endpoints.yaml"
-RAW_DIR = DATA_DIR / "raw"          # one folder per fetcher/data-type of pulled JSON
+DB_DIR = DATA_DIR / "db"            # one SQLite database per fetcher
 STATE_DIR = DATA_DIR / "state"      # scheduler + rate-limiter bookkeeping
 SCHEDULE_STATE = STATE_DIR / "schedule.json"
 RATELIMIT_STATE = STATE_DIR / "ratelimit.json"
