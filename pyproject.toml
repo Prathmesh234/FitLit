@@ -4,9 +4,8 @@ version = "0.1.0"
 description = "Cron-job based fetcher for Fitbit / Google Health API data"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
-
-[dependency-groups]
-dev = [
+dependencies = [
     "pyyaml>=6.0.3",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
 ]
