@@ -1,0 +1,470 @@
+# FitLit - machine-readable API endpoint catalogue
+# Generated during the research stage (2026-06-19) by scripts/gen_endpoints_yaml.py
+# Two APIs are catalogued: the legacy Fitbit Web API (deprecated Sep 2026) and
+# the new Google Health API v4 (recommended target).
+# See ../docs/fitbit-api-research.md for the full human-readable write-up.
+# Edit the generator, not this file.
+
+meta:
+  researched_on: '2026-06-19'
+  recommended_api: google_health
+legacy_fitbit_web_api:
+  base_url: https://api.fitbit.com
+  status: deprecated
+  deprecation: Legacy Web API turned down September 2026
+  user_placeholder: '-'
+  scopes:
+  - activity
+  - cardio_fitness
+  - electrocardiogram
+  - heartrate
+  - irregular_rhythm_notifications
+  - location
+  - nutrition
+  - oxygen_saturation
+  - profile
+  - respiratory_rate
+  - settings
+  - sleep
+  - social
+  - temperature
+  - weight
+  domains:
+    authorization:
+      endpoints:
+      - method: POST
+        path: /oauth2/token
+      - method: POST
+        path: /oauth2/revoke
+      - method: POST
+        path: /1.1/oauth2/introspect
+    user:
+      endpoints:
+      - method: GET
+        path: /1/user/-/profile.json
+      - method: POST
+        path: /1/user/-/profile.json
+      - method: GET
+        path: /1/user/-/badges.json
+    devices:
+      endpoints:
+      - method: GET
+        path: /1/user/-/devices.json
+      - method: GET
+        path: /1/user/-/devices/tracker/{tracker-id}/alarms.json
+      - method: POST
+        path: /1/user/-/devices/tracker/{tracker-id}/alarms.json
+      - method: POST
+        path: /1/user/-/devices/tracker/{tracker-id}/alarms/{alarm-id}.json
+      - method: DELETE
+        path: /1/user/-/devices/tracker/{tracker-id}/alarms/{alarm-id}.json
+    activity:
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/date/{date}.json
+      - method: GET
+        path: /1/user/-/activities.json
+      - method: POST
+        path: /1/user/-/activities.json
+      - method: DELETE
+        path: /1/user/-/activities/{activity-log-id}.json
+      - method: GET
+        path: /1/user/-/activities/list.json
+      - method: GET
+        path: /1/user/-/activities/{log-id}.tcx
+      - method: GET
+        path: /1/activities.json
+      - method: GET
+        path: /1/activities/{activity-id}.json
+      - method: GET
+        path: /1/user/-/activities/favorite.json
+      - method: POST
+        path: /1/user/-/activities/favorite/{activity-id}.json
+      - method: DELETE
+        path: /1/user/-/activities/favorite/{activity-id}.json
+      - method: GET
+        path: /1/user/-/activities/frequent.json
+      - method: GET
+        path: /1/user/-/activities/recent.json
+      - method: GET
+        path: /1/user/-/activities/goals/{period}.json
+      - method: POST
+        path: /1/user/-/activities/goals/{period}.json
+    activity_time_series:
+      resource_paths:
+      - calories
+      - caloriesBMR
+      - steps
+      - distance
+      - floors
+      - elevation
+      - minutesSedentary
+      - minutesLightlyActive
+      - minutesFairlyActive
+      - minutesVeryActive
+      - activityCalories
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{base-date}/{end-date}.json
+      - method: GET
+        path: /1/user/-/activities/tracker/{resource-path}/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/activities/tracker/{resource-path}/date/{base-date}/{end-date}.json
+    activity_intraday:
+      requires_approval: true
+      detail_levels:
+      - 1min
+      - 5min
+      - 15min
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{date}/1d/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{date}/1d/{detail-level}/time/{start-time}/{end-time}.json
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{base-date}/{end-date}/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/{resource-path}/date/{date}/{end-date}/{detail-level}/time/{start-time}/{end-time}.json
+    active_zone_minutes_time_series:
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{start-date}/{end-date}.json
+    active_zone_minutes_intraday:
+      detail_levels:
+      - 1min
+      - 5min
+      - 15min
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{date}/1d/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{date}/1d/{detail-level}/time/{start-time}/{end-time}.json
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{start-date}/{end-date}/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/active-zone-minutes/date/{start-date}/{end-date}/{detail-level}/time/{start-time}/{end-time}.json
+    body:
+      endpoints:
+      - method: POST
+        path: /1/user/-/body/log/weight.json
+      - method: DELETE
+        path: /1/user/-/body/log/weight/{body-weight-log-id}.json
+      - method: GET
+        path: /1/user/-/body/log/weight/date/{date}.json
+      - method: GET
+        path: /1/user/-/body/log/weight/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/body/log/weight/date/{base-date}/{end-date}.json
+      - method: POST
+        path: /1/user/-/body/log/fat.json
+      - method: DELETE
+        path: /1/user/-/body/log/fat/{body-fat-log-id}.json
+      - method: GET
+        path: /1/user/-/body/log/fat/date/{date}.json
+      - method: GET
+        path: /1/user/-/body/log/fat/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/body/log/fat/date/{base-date}/{end-date}.json
+      - method: GET
+        path: /1/user/-/body/log/{goal-type}/goal.json
+      - method: POST
+        path: /1/user/-/body/log/weight/goal.json
+      - method: POST
+        path: /1/user/-/body/log/fat/goal.json
+    body_time_series:
+      resource_paths:
+      - bmi
+      - fat
+      - weight
+      endpoints:
+      - method: GET
+        path: /1/user/-/body/{resource-path}/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/body/{resource-path}/date/{base-date}/{end-date}.json
+    nutrition:
+      endpoints:
+      - method: GET
+        path: /1/user/-/foods/log/date/{date}.json
+      - method: POST
+        path: /1/user/-/foods/log.json
+      - method: POST
+        path: /1/user/-/foods/log/{food-log-id}.json
+      - method: DELETE
+        path: /1/user/-/foods/log/{food-log-id}.json
+      - method: POST
+        path: /1/user/-/foods.json
+      - method: DELETE
+        path: /1/user/-/foods/{food-id}.json
+      - method: GET
+        path: /1/foods/{food-id}.json
+      - method: GET
+        path: /1/foods/search.json
+      - method: GET
+        path: /1/foods/units.json
+      - method: GET
+        path: /1/foods/locales.json
+      - method: GET
+        path: /1/user/-/foods/log/favorite.json
+      - method: POST
+        path: /1/user/-/foods/log/favorite/{food-id}.json
+      - method: DELETE
+        path: /1/user/-/foods/log/favorite/{food-id}.json
+      - method: GET
+        path: /1/user/-/foods/log/frequent.json
+      - method: GET
+        path: /1/user/-/foods/log/recent.json
+      - method: GET
+        path: /1/user/-/foods/log/goal.json
+      - method: POST
+        path: /1/user/-/foods/log/goal.json
+      - method: GET
+        path: /1/user/-/foods/log/water/date/{date}.json
+      - method: POST
+        path: /1/user/-/foods/log/water.json
+      - method: POST
+        path: /1/user/-/foods/log/water/{water-log-id}.json
+      - method: DELETE
+        path: /1/user/-/foods/log/water/{water-log-id}.json
+      - method: GET
+        path: /1/user/-/foods/log/water/goal.json
+      - method: POST
+        path: /1/user/-/foods/log/water/goal.json
+      - method: GET
+        path: /1/user/-/meals.json
+      - method: POST
+        path: /1/user/-/meals.json
+      - method: GET
+        path: /1/user/-/meals/{meal-id}.json
+      - method: POST
+        path: /1/user/-/meals/{meal-id}.json
+      - method: DELETE
+        path: /1/user/-/meals/{meal-id}.json
+    nutrition_time_series:
+      resource_paths:
+      - caloriesIn
+      - water
+      endpoints:
+      - method: GET
+        path: /1/user/-/foods/log/{resource-path}/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/foods/log/{resource-path}/date/{base-date}/{end-date}.json
+    sleep:
+      endpoints:
+      - method: GET
+        path: /1.2/user/-/sleep/date/{date}.json
+      - method: GET
+        path: /1.2/user/-/sleep/date/{base-date}/{end-date}.json
+      - method: GET
+        path: /1.2/user/-/sleep/list.json
+      - method: POST
+        path: /1.2/user/-/sleep.json
+      - method: DELETE
+        path: /1.2/user/-/sleep/{log-id}.json
+      - method: GET
+        path: /1.2/user/-/sleep/goal.json
+      - method: POST
+        path: /1.2/user/-/sleep/goal.json
+    heart_rate_time_series:
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/heart/date/{date}/{period}.json
+      - method: GET
+        path: /1/user/-/activities/heart/date/{base-date}/{end-date}.json
+    heart_rate_intraday:
+      detail_levels:
+      - 1sec
+      - 1min
+      - 5min
+      - 15min
+      endpoints:
+      - method: GET
+        path: /1/user/-/activities/heart/date/{date}/1d/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/heart/date/{date}/1d/{detail-level}/time/{start-time}/{end-time}.json
+      - method: GET
+        path: /1/user/-/activities/heart/date/{date}/{end-date}/{detail-level}.json
+      - method: GET
+        path: /1/user/-/activities/heart/date/{date}/{end-date}/{detail-level}/time/{start-time}/{end-time}.json
+    heart_rate_variability:
+      endpoints:
+      - method: GET
+        path: /1/user/-/hrv/date/{date}.json
+      - method: GET
+        path: /1/user/-/hrv/date/{startDate}/{endDate}.json
+    heart_rate_variability_intraday:
+      endpoints:
+      - method: GET
+        path: /1/user/-/hrv/date/{date}/all.json
+      - method: GET
+        path: /1/user/-/hrv/date/{startDate}/{endDate}/all.json
+    breathing_rate:
+      endpoints:
+      - method: GET
+        path: /1/user/-/br/date/{date}.json
+      - method: GET
+        path: /1/user/-/br/date/{startDate}/{endDate}.json
+    breathing_rate_intraday:
+      endpoints:
+      - method: GET
+        path: /1/user/-/br/date/{date}/all.json
+      - method: GET
+        path: /1/user/-/br/date/{startDate}/{endDate}/all.json
+    cardio_fitness_vo2max:
+      endpoints:
+      - method: GET
+        path: /1/user/-/cardioscore/date/{date}.json
+      - method: GET
+        path: /1/user/-/cardioscore/date/{startDate}/{endDate}.json
+    spo2:
+      endpoints:
+      - method: GET
+        path: /1/user/-/spo2/date/{date}.json
+      - method: GET
+        path: /1/user/-/spo2/date/{startDate}/{endDate}.json
+      - method: GET
+        path: /1/user/-/spo2/date/{date}/all.json
+      - method: GET
+        path: /1/user/-/spo2/date/{startDate}/{endDate}/all.json
+    temperature:
+      endpoints:
+      - method: GET
+        path: /1/user/-/temp/core/date/{date}.json
+      - method: GET
+        path: /1/user/-/temp/core/date/{startDate}/{endDate}.json
+      - method: GET
+        path: /1/user/-/temp/skin/date/{date}.json
+      - method: GET
+        path: /1/user/-/temp/skin/date/{startDate}/{endDate}.json
+    electrocardiogram:
+      endpoints:
+      - method: GET
+        path: /1/user/-/ecg/list.json
+    irregular_rhythm_notifications:
+      endpoints:
+      - method: GET
+        path: /1/user/-/irn/profile.json
+      - method: GET
+        path: /1/user/-/irn/alerts/list.json
+    blood_glucose:
+      endpoints:
+      - method: GET
+        path: /1/user/-/glucose/date/{date}.json
+    friends:
+      endpoints:
+      - method: GET
+        path: /1.1/user/-/friends.json
+      - method: GET
+        path: /1.1/user/-/leaderboard/friends.json
+    subscriptions:
+      collection_paths:
+      - activities
+      - body
+      - foods
+      - sleep
+      - userRevokedAccess
+      endpoints:
+      - method: GET
+        path: /1/user/-/{collection-path}/apiSubscriptions.json
+      - method: POST
+        path: /1/user/-/{collection-path}/apiSubscriptions/{subscription-id}.json
+      - method: DELETE
+        path: /1/user/-/{collection-path}/apiSubscriptions/{subscription-id}.json
+google_health_api:
+  base_url: https://health.googleapis.com
+  version: v4
+  status: current
+  discovery: https://health.googleapis.com/$discovery/rest?version=v4
+  user_placeholder: me
+  naming: kebab-case in path (body-fat), snake_case in filters (body_fat)
+  scopes:
+    activity_and_fitness: https://www.googleapis.com/auth/googlehealth.activity_and_fitness
+    activity_and_fitness_readonly: https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly
+    health_metrics_and_measurements: https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements
+    health_metrics_and_measurements_readonly: https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly
+    sleep_readonly: https://www.googleapis.com/auth/googlehealth.sleep.readonly
+    nutrition_readonly: https://www.googleapis.com/auth/googlehealth.nutrition.readonly
+    location_readonly: https://www.googleapis.com/auth/googlehealth.location.readonly
+  resources:
+    data_points:
+      endpoints:
+      - method: GET
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints
+        op: list
+      - method: POST
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints
+        op: create
+      - method: POST
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints:batchDelete
+        op: batchDelete
+      - method: POST
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints:rollUp
+        op: rollUp
+      - method: POST
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints:dailyRollUp
+        op: dailyRollUp
+      - method: POST
+        path: /v4/users/{user}/dataTypes/{dataType}/dataPoints:reconcile
+        op: reconcile
+    notification_channels:
+      endpoints:
+      - op: create
+      - op: delete
+      - op: list
+    operations:
+      endpoints:
+      - op: get
+      - op: list
+    data_sources:
+      endpoints:
+      - op: list
+  data_types:
+    activity_and_fitness:
+    - activeZoneMinutes
+    - activeMinutes
+    - activityLevel
+    - altitude
+    - caloriesInHeartRateZone
+    - dailyHeartRateZones
+    - distance
+    - exercise
+    - floors
+    - sedentaryPeriod
+    - steps
+    - timeInHeartRateZone
+    - totalCalories
+    - dailyVo2Max
+    - runVo2Max
+    - vo2Max
+    - goals
+    health_metrics_and_measurements:
+    - bodyFat
+    - weight
+    - height
+    - heartRate
+    - dailyRestingHeartRate
+    - heartRateVariability
+    - dailyHeartRateVariability
+    - oxygenSaturation
+    - dailyOxygenSaturation
+    - respiratoryRate
+    - dailyRespiratoryRate
+    - respiratoryRateSleepSummary
+    - bloodGlucose
+    - bodyTemperature
+    - coreBodyTemperature
+    - dailySleepTemperatureDerivations
+    - ecgMeasurement
+    - ecgRhythmClassification
+    - afibAnalysisWindow
+    sleep:
+    - sleep
+    - sleepSummary
+    nutrition:
+    - nutritionLog
+    - hydrationLog
+    location:
+    - location

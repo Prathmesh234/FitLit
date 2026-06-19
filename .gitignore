@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# uv / virtualenv
+.venv/
+venv/
+
+# Environment & secrets (OAuth tokens, client secrets)
+.env
+.env.*
+*.secret
+tokens.json
+credentials.json
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
