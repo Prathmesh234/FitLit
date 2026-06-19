@@ -17,6 +17,10 @@ venv/
 tokens.json
 credentials.json
 
+# FitLit runtime output (pulled data + scheduler/rate-limit state)
+data/raw/
+data/state/
+
 # Editor / OS
 .idea/
 .vscode/
