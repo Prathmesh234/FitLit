@@ -37,7 +37,7 @@ def fetch_once(name: str) -> dict:
     succeeded = 0
     stored = 0
     for data_type in fetcher.data_types:
-        result = client.list_data_points(data_type)
+        result = client.fetch(data_type)
         if result is not None:
             succeeded += 1
             stored += result

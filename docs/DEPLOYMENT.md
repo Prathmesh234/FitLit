@@ -301,22 +301,41 @@ Alternative (cron-only, no API): a `@reboot` entry running
 Captured from the first live run on the VM (2026-06-20). None of these block
 data capture today — they're the next workstreams.
 
-### 7a. Some data types return `400 Bad Request`
+### 7a. Some data types returned `400 Bad Request` — fixed 2026-06-20
 
-These 9 types are currently rejected by the API and skipped (logged, never fatal):
-`totalCalories`, `floors`, `caloriesInHeartRateZone`, `bodyTemperature`,
-`sleepSummary`, `location`, `ecgMeasurement`, `ecgRhythmClassification`,
-`afibAnalysisWindow`.
+The first live run logged 11 data types that the API rejected with `400`. Root
+cause was **three** distinct issues (not the camelCase→kebab mapping), now fixed:
 
-Meanwhile `heartRate`, `steps`, `distance`, `activeMinutes`, `activeZoneMinutes`,
-`activityLevel`, `sedentaryPeriod`, `timeInHeartRateZone`, `dailyHeartRateZones`,
-`weight`, `height`, `sleep` all work. Since it's per-type (not auth/scope —
-those would be `401`/`403`), the likely cause is the camelCase→kebab path
-mapping in [`client.py`](../fitlit/client.py) (`_camel_to_kebab`) not matching
-the API's dataType segment for these types, or a required query parameter (e.g.
-a time range) the `dataPoints.list` call omits for them. **TODO:** verify each
-failing type's exact path/params against the Google Health API and fix the
-mapping (cross-check [`docs/fitbit-api-research.md`](fitbit-api-research.md)).
+1. **List-unsupported (rollup-only) — 3 types.** `totalCalories`, `floors`,
+   `caloriesInHeartRateZone` reject `dataPoints.list` and only support
+   aggregation. They're now fetched via `dataPoints:dailyRollUp`
+   ([`client.py`](../fitlit/client.py) `daily_rollup_data_points`), keyed per
+   day so re-fetching a still-changing day upserts instead of duplicating.
+2. **Mis-identified medical types — 3 → 2.** The catalogue invented
+   `ecgMeasurement`, `ecgRhythmClassification`, `afibAnalysisWindow`. The real v4
+   dataTypes are **`electrocardiogram`** (rhythm classification is a field on it)
+   and **`irregular-rhythm-notification`**. These need their own scopes —
+   `googlehealth.ecg.readonly` and `googlehealth.irn.readonly` — now added to
+   `config.SCOPES`. **They return `403` until you re-consent** (see below).
+3. **Phantom types — 5 removed.** `goals`, `location`, `respiratoryRate`,
+   `bodyTemperature`, `sleepSummary` have no v4 dataType collection; the data
+   lives in types we already capture (`dailyRespiratoryRate` /
+   `respiratoryRateSleepSummary`, `coreBodyTemperature`, the `sleep` session's
+   nested summary). The standalone `location` fetcher was dropped with them.
+
+After the fix the catalogue holds **35** Google Health dataTypes across **7**
+fetchers; `catalog.validate_coverage()` enforces it on import.
+
+**Re-consent for ECG/IRN (one-time).** The new scopes aren't in the existing
+refresh token, so ECG/IRN stay `403` until you re-run consent:
+
+```bash
+uv run python scripts/oauth_capture.py     # or: uv run python -m fitlit.auth login
+sudo systemctl restart fitlit              # pick up the new refresh token
+```
+
+Until then those two types are logged at `WARNING` and skipped (non-fatal), and
+all 33 other types capture normally.
 
 Also note: `heartRate` (and other **Sample**-shaped types) carry their timestamp
 in `data.sampleTime.physicalTime`, not a `startTime`/`endTime` envelope — so the

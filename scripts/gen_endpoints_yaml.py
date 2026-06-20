@@ -256,6 +256,8 @@ CATALOGUE = {
             "sleep_readonly": "https://www.googleapis.com/auth/googlehealth.sleep.readonly",
             "nutrition_readonly": "https://www.googleapis.com/auth/googlehealth.nutrition.readonly",
             "location_readonly": "https://www.googleapis.com/auth/googlehealth.location.readonly",
+            "ecg_readonly": "https://www.googleapis.com/auth/googlehealth.ecg.readonly",
+            "irn_readonly": "https://www.googleapis.com/auth/googlehealth.irn.readonly",
         },
         "resources": {
             "data_points": {"endpoints": [
@@ -276,16 +278,25 @@ CATALOGUE = {
             "activity_and_fitness": ["activeZoneMinutes", "activeMinutes", "activityLevel",
                 "altitude", "caloriesInHeartRateZone", "dailyHeartRateZones", "distance",
                 "exercise", "floors", "sedentaryPeriod", "steps", "timeInHeartRateZone",
-                "totalCalories", "dailyVo2Max", "runVo2Max", "vo2Max", "goals"],
+                "totalCalories", "dailyVo2Max", "runVo2Max", "vo2Max"],
             "health_metrics_and_measurements": ["bodyFat", "weight", "height", "heartRate",
                 "dailyRestingHeartRate", "heartRateVariability", "dailyHeartRateVariability",
-                "oxygenSaturation", "dailyOxygenSaturation", "respiratoryRate",
+                "oxygenSaturation", "dailyOxygenSaturation",
                 "dailyRespiratoryRate", "respiratoryRateSleepSummary", "bloodGlucose",
-                "bodyTemperature", "coreBodyTemperature", "dailySleepTemperatureDerivations",
-                "ecgMeasurement", "ecgRhythmClassification", "afibAnalysisWindow"],
-            "sleep": ["sleep", "sleepSummary"],
+                "coreBodyTemperature", "dailySleepTemperatureDerivations",
+                "electrocardiogram", "irregularRhythmNotification"],
+            "sleep": ["sleep"],
             "nutrition": ["nutritionLog", "hydrationLog"],
-            "location": ["location"],
+        },
+        # These types reject `dataPoints.list` (HTTP 400) and are fetched via
+        # `dataPoints:dailyRollUp` instead. See fitlit/client.py.
+        "list_unsupported_use_daily_rollup": ["totalCalories", "floors",
+            "caloriesInHeartRateZone"],
+        # `electrocardiogram` requires the ecg.readonly scope; the
+        # irregular-rhythm-notification type requires irn.readonly.
+        "scope_gated_types": {
+            "electrocardiogram": "ecg_readonly",
+            "irregularRhythmNotification": "irn_readonly",
         },
     },
 }

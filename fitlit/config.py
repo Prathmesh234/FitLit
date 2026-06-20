@@ -117,6 +117,15 @@ PORT = int(_env("PORT", "8000"))
 # FITLIT_SQLITE_JOURNAL=DELETE there.
 SQLITE_JOURNAL_MODE = _env("FITLIT_SQLITE_JOURNAL", "WAL")
 
+# Some Google Health data types reject `dataPoints.list` with HTTP 400 and only
+# support aggregation endpoints. We fetch these via `dataPoints:dailyRollUp`
+# instead (see fitlit/client.py). The rollup needs a date range; we re-request a
+# trailing window each cycle (the API caps it at 14 days for these types).
+DAILY_ROLLUP_TYPES: frozenset[str] = frozenset({
+    "totalCalories", "floors", "caloriesInHeartRateZone",
+})
+ROLLUP_LOOKBACK_DAYS = int(_env("FITLIT_ROLLUP_LOOKBACK_DAYS", "7"))
+
 
 # --------------------------------------------------------------------------- #
 # Fetcher definitions
@@ -125,55 +134,54 @@ SQLITE_JOURNAL_MODE = _env("FITLIT_SQLITE_JOURNAL", "WAL")
 class Fetcher:
     name: str
     interval_seconds: int          # cadence — how often the orchestrator runs it
-    scope: str                     # the Google Health OAuth scope it needs
+    scopes: tuple[str, ...]        # the Google Health OAuth scope(s) it needs
     data_types: list[str] = field(default_factory=list)
 
 
 # Cadence intent:
 #   * 60s    near-real-time streams (steps, heart rate, calories…)
-#   * 300s   event-driven medical signals (ECG, AFib) + location/route
+#   * 300s   event-driven medical signals (ECG, AFib)
 #   * 1800s  occasional logs (body measurements, food/water)
 #   * 3600s  once-an-hour daily roll-ups + sleep
 _ACTIVITY = "https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly"
 _METRICS = "https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly"
 _SLEEP = "https://www.googleapis.com/auth/googlehealth.sleep.readonly"
 _NUTRITION = "https://www.googleapis.com/auth/googlehealth.nutrition.readonly"
-_LOCATION = "https://www.googleapis.com/auth/googlehealth.location.readonly"
+# ECG + irregular-rhythm-notification each sit behind their own sensitive scope.
+_ECG = "https://www.googleapis.com/auth/googlehealth.ecg.readonly"
+_IRN = "https://www.googleapis.com/auth/googlehealth.irn.readonly"
 
 FETCHERS: dict[str, Fetcher] = {
-    "live_activity": Fetcher("live_activity", 60, _ACTIVITY, [
+    "live_activity": Fetcher("live_activity", 60, (_ACTIVITY,), [
         "steps", "distance", "totalCalories", "activeMinutes", "activeZoneMinutes",
         "floors", "activityLevel", "sedentaryPeriod", "altitude",
         "caloriesInHeartRateZone", "timeInHeartRateZone",
     ]),
-    "heart": Fetcher("heart", 60, _METRICS, [
+    "heart": Fetcher("heart", 60, (_METRICS,), [
         "heartRate",
     ]),
-    "daily_summaries": Fetcher("daily_summaries", 3600, _ACTIVITY, [
-        "dailyHeartRateZones", "dailyVo2Max", "runVo2Max", "vo2Max", "goals",
+    "daily_summaries": Fetcher("daily_summaries", 3600, (_ACTIVITY,), [
+        "dailyHeartRateZones", "dailyVo2Max", "runVo2Max", "vo2Max",
         "exercise", "dailyRestingHeartRate", "heartRateVariability",
         "dailyHeartRateVariability", "oxygenSaturation", "dailyOxygenSaturation",
-        "respiratoryRate", "dailyRespiratoryRate", "respiratoryRateSleepSummary",
+        "dailyRespiratoryRate", "respiratoryRateSleepSummary",
         "dailySleepTemperatureDerivations",
     ]),
-    "body": Fetcher("body", 1800, _METRICS, [
-        "bodyFat", "weight", "height", "bodyTemperature", "coreBodyTemperature",
+    "body": Fetcher("body", 1800, (_METRICS,), [
+        "bodyFat", "weight", "height", "coreBodyTemperature",
         "bloodGlucose",
     ]),
-    "sleep": Fetcher("sleep", 3600, _SLEEP, [
-        "sleep", "sleepSummary",
+    "sleep": Fetcher("sleep", 3600, (_SLEEP,), [
+        "sleep",
     ]),
-    "nutrition": Fetcher("nutrition", 1800, _NUTRITION, [
+    "nutrition": Fetcher("nutrition", 1800, (_NUTRITION,), [
         "nutritionLog", "hydrationLog",
     ]),
-    "cardiac": Fetcher("cardiac", 300, _METRICS, [
-        "ecgMeasurement", "ecgRhythmClassification", "afibAnalysisWindow",
-    ]),
-    "location": Fetcher("location", 300, _LOCATION, [
-        "location",
+    "cardiac": Fetcher("cardiac", 300, (_ECG, _IRN), [
+        "electrocardiogram", "irregularRhythmNotification",
     ]),
 }
 
 # The full read-only scope set FitLit needs — every distinct scope across the
 # fetchers above.  `fitlit/auth.py login` requests exactly these during consent.
-SCOPES: list[str] = sorted({f.scope for f in FETCHERS.values()})
+SCOPES: list[str] = sorted({scope for f in FETCHERS.values() for scope in f.scopes})

@@ -388,6 +388,8 @@ google_health_api:
     sleep_readonly: https://www.googleapis.com/auth/googlehealth.sleep.readonly
     nutrition_readonly: https://www.googleapis.com/auth/googlehealth.nutrition.readonly
     location_readonly: https://www.googleapis.com/auth/googlehealth.location.readonly
+    ecg_readonly: https://www.googleapis.com/auth/googlehealth.ecg.readonly
+    irn_readonly: https://www.googleapis.com/auth/googlehealth.irn.readonly
   resources:
     data_points:
       endpoints:
@@ -439,7 +441,6 @@ google_health_api:
     - dailyVo2Max
     - runVo2Max
     - vo2Max
-    - goals
     health_metrics_and_measurements:
     - bodyFat
     - weight
@@ -450,21 +451,22 @@ google_health_api:
     - dailyHeartRateVariability
     - oxygenSaturation
     - dailyOxygenSaturation
-    - respiratoryRate
     - dailyRespiratoryRate
     - respiratoryRateSleepSummary
     - bloodGlucose
-    - bodyTemperature
     - coreBodyTemperature
     - dailySleepTemperatureDerivations
-    - ecgMeasurement
-    - ecgRhythmClassification
-    - afibAnalysisWindow
+    - electrocardiogram
+    - irregularRhythmNotification
     sleep:
     - sleep
-    - sleepSummary
     nutrition:
     - nutritionLog
     - hydrationLog
-    location:
-    - location
+  list_unsupported_use_daily_rollup:
+  - totalCalories
+  - floors
+  - caloriesInHeartRateZone
+  scope_gated_types:
+    electrocardiogram: ecg_readonly
+    irregularRhythmNotification: irn_readonly

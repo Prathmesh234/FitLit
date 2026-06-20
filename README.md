@@ -50,15 +50,17 @@ so the orchestrator *is* the scheduler — cron just keeps it alive
 |---|---|---|
 | `live_activity` | 60s | steps, distance, calories, active/zone minutes, floors… |
 | `heart` | 60s | live heart rate |
-| `cardiac` | 5 min | ECG measurement + rhythm, AFib windows |
-| `location` | 5 min | exercise route / GPS |
+| `cardiac` | 5 min | electrocardiogram (ECG), irregular-rhythm-notification (AFib) |
 | `body` | 30 min | weight, body fat, height, temperature, glucose |
 | `nutrition` | 30 min | food + hydration logs |
-| `sleep` | 60 min | sleep sessions + summaries |
-| `daily_summaries` | 60 min | resting HR, VO2 max, HRV, SpO2, respiratory rate, goals… |
+| `sleep` | 60 min | sleep sessions |
+| `daily_summaries` | 60 min | resting HR, VO2 max, HRV, SpO2, respiratory rate… |
 
-All 41 Google Health data types from the catalogue are covered exactly once;
-`catalog.validate_coverage()` enforces this on import.
+All 35 Google Health data types from the catalogue are covered exactly once;
+`catalog.validate_coverage()` enforces this on import. A few types
+(`totalCalories`, `floors`, `caloriesInHeartRateZone`) reject `dataPoints.list`
+and are fetched via `dataPoints:dailyRollUp` instead; ECG + irregular-rhythm
+types sit behind their own OAuth scopes.
 
 **Rate limiting (kept simple).** Google Health rejects with `429` past ~120
 requests/min/user. A shared file-based fixed-window limiter

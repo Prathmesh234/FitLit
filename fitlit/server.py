@@ -115,7 +115,7 @@ def list_fetchers() -> dict:
     return {
         name: {
             "interval_seconds": f.interval_seconds,
-            "scope": f.scope,
+            "scopes": list(f.scopes),
             "data_types": f.data_types,
         }
         for name, f in config.FETCHERS.items()

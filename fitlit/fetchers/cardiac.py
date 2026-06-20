@@ -1,6 +1,8 @@
 """cardiac — event-driven medical signals (every 300s).
 
-ECG measurements + rhythm classification, AFib analysis windows.
+Electrocardiogram (ECG measurement + rhythm classification) and
+irregular-rhythm-notification (AFib) events. Each needs its own OAuth scope
+(ecg.readonly / irn.readonly) — see fitlit/config.py.
 """
 from fitlit.fetchers.base import main
 

@@ -104,9 +104,9 @@ def sleep_points() -> list[dict]:
 def respiratory_points() -> list[dict]:
     # An UNMODELED type: must still store the full payload via raw_json/data_json.
     return [{
-        "name": "users/me/dataTypes/respiratoryRate/dataPoints/seed-rr-1",
+        "name": "users/me/dataTypes/dailyRespiratoryRate/dataPoints/seed-rr-1",
         "dataSource": {"platform": "FITBIT"},
-        "respiratoryRate": {"sampleTime": iso(BASE), "breathsPerMinute": 14.3,
+        "dailyRespiratoryRate": {"sampleTime": iso(BASE), "breathsPerMinute": 14.3,
                             "confidence": "HIGH", "futureFieldGoogleMightAdd": [1, 2, 3]},
     }]
 
@@ -118,7 +118,7 @@ def main() -> None:
         ("body", "weight", weight_points()),
         ("body", "bloodGlucose", glucose_points()),
         ("sleep", "sleep", sleep_points()),
-        ("daily_summaries", "respiratoryRate", respiratory_points()),
+        ("daily_summaries", "dailyRespiratoryRate", respiratory_points()),
     ]
     print("Seeding dummy data through fitlit.storage ...\n")
     for fetcher, data_type, points in jobs:
