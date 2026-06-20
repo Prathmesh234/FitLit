@@ -249,7 +249,9 @@ Type=simple
 User=azureuser
 WorkingDirectory=/home/azureuser/FitLit
 # uv reads .env via the app; EnvironmentFile is optional/redundant.
-ExecStart=/home/azureuser/.local/bin/uv run uvicorn fitlit.server:app --host 0.0.0.0 --port 8000
+# Bind to localhost only — the API has no auth, so it's reached via SSH tunnel,
+# never exposed on a public interface. (See §8 Security.)
+ExecStart=/home/azureuser/.local/bin/uv run uvicorn fitlit.server:app --host 127.0.0.1 --port 8000
 Restart=always
 RestartSec=5
 
@@ -267,9 +269,10 @@ curl http://localhost:8000/status   # scheduler state + rate-limit budget
 curl http://localhost:8000/stats    # stored row counts per type per DB
 ```
 
-> To reach the API from outside the VM, open the port (8000) in the Azure NSG.
-> Currently bound to `0.0.0.0:8000` but only reachable locally unless that
-> inbound rule is added.
+> The API is bound to **`127.0.0.1:8000`** (localhost only) — it has no auth, so
+> it must not be exposed. Reach it from your laptop with an SSH tunnel:
+> `ssh -L 8000:localhost:8000 fitlit`, then open `localhost:8000` locally. See
+> §8 before ever changing this. 
 
 Alternative (cron-only, no API): a `@reboot` entry running
 `uv run python -m fitlit.orchestrator` — see [`crontab.example`](../crontab.example).
@@ -348,3 +351,33 @@ unbounded growth/cost over a lifetime of polling. Levers, highest leverage first
    than SQLite for analytics. SQLite is fine for now given per-fetcher DBs +
    indexes; the risks to watch are disk fill, WAL bloat, and query latency as
    tables reach millions of rows.
+
+---
+
+## 8. Security posture
+
+Applied on the VM (2026-06-20):
+
+| Control | State |
+|---|---|
+| `.env` (holds refresh token) | `chmod 600`, gitignored — never `git add -f` it |
+| `data/state/token.json` (cached access token) | `chmod 600` (auth.py writes it `0600`) |
+| `~/.ssh`, `authorized_keys` | `700` / `600` |
+| SSH password auth | disabled (`PasswordAuthentication no`) — key-only |
+| SSH root login | disabled (`PermitRootLogin no`, drop-in `99-fitlit-hardening.conf`) |
+| FastAPI bind | `127.0.0.1:8000` — **the API has no auth**; reach it via SSH tunnel |
+
+Operating rules:
+
+- **The OAuth refresh token is a master key** to the health data — readable from
+  anywhere, no device needed. Never commit it, never paste it into chat/email; if
+  it leaks, revoke at <https://myaccount.google.com/permissions> and re-mint.
+- **`azureuser` has passwordless sudo**, so the laptop/phone SSH *private* keys
+  effectively own the box. Never share/commit a private key (only the
+  `ssh-ed25519 …` public line); prefer a passphrase on the laptop key.
+- **Don't expose port 8000.** It has no authentication (`/fetchers/{name}/run`,
+  `/stats`, … are open). Keep it bound to localhost + closed in the NSG. Only
+  publish it behind auth + HTTPS (e.g. a reverse proxy) if ever needed.
+- Optional defense-in-depth: a host firewall (`ufw allow 22/tcp` **first**, then
+  `ufw enable`) — low marginal value now that 8000 is localhost-bound and the NSG
+  only opens 22, and it carries lock-out risk over SSH, so it's left off.
