@@ -30,7 +30,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
 
-from fitlit import config, orchestrator, ratelimit, storage
+from fitlit import auth, config, orchestrator, ratelimit, storage
 from fitlit.client import MissingTokenError
 from fitlit.fetchers.base import fetch_once
 
@@ -86,9 +86,14 @@ def health() -> dict:
 
 @app.get("/ready")
 def ready() -> dict:
-    """Readiness probe — 200 only once an access token is configured."""
-    if not config.ACCESS_TOKEN:
-        raise HTTPException(status_code=503, detail="no GOOGLE_HEALTH_ACCESS_TOKEN configured")
+    """Readiness probe — 200 once a token can be obtained (OAuth refresh creds
+    or a static access token)."""
+    if not auth.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="no credentials — set GOOGLE_HEALTH_ACCESS_TOKEN or OAuth "
+            "refresh vars (see docs/DEPLOYMENT.md §2)",
+        )
     return {"status": "ready"}
 
 
@@ -121,7 +126,7 @@ def list_fetchers() -> dict:
 def status() -> dict:
     return {
         "scheduler_running": _scheduler_alive(),
-        "token_configured": bool(config.ACCESS_TOKEN),
+        "token_configured": auth.is_configured(),
         "rate_limit": ratelimit.snapshot(),
         "fetchers": orchestrator.schedule_status(),
     }

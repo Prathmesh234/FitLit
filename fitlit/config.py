@@ -63,10 +63,32 @@ def _env(name: str, default: str) -> str:
 # --------------------------------------------------------------------------- #
 BASE_URL = _env("GOOGLE_HEALTH_BASE_URL", "https://health.googleapis.com")
 API_USER = _env("GOOGLE_HEALTH_USER", "me")            # 'me' = the token's user
-# We assume the access token is present (the user wires real OAuth in later).
+# A pre-minted access token. Optional once OAuth refresh is configured (below):
+# auth.py mints its own from the refresh token. Still honoured as a fallback /
+# for quick one-off testing.
 ACCESS_TOKEN = os.environ.get("GOOGLE_HEALTH_ACCESS_TOKEN", "")
 PAGE_SIZE = int(_env("GOOGLE_HEALTH_PAGE_SIZE", "100"))
 REQUEST_TIMEOUT = int(_env("GOOGLE_HEALTH_TIMEOUT", "30"))
+
+# --------------------------------------------------------------------------- #
+# OAuth 2.0 (Google) — refresh-token flow.  Access tokens live ~1h; the
+# long-lived refresh token mints fresh ones unattended.  See fitlit/auth.py and
+# docs/DEPLOYMENT.md §2/§4.  CLIENT_ID/SECRET come from the Google Cloud OAuth
+# client; REFRESH_TOKEN is captured once via `python -m fitlit.auth login`.
+# --------------------------------------------------------------------------- #
+OAUTH_CLIENT_ID = os.environ.get("GOOGLE_HEALTH_CLIENT_ID", "")
+OAUTH_CLIENT_SECRET = os.environ.get("GOOGLE_HEALTH_CLIENT_SECRET", "")
+OAUTH_REFRESH_TOKEN = os.environ.get("GOOGLE_HEALTH_REFRESH_TOKEN", "")
+OAUTH_AUTH_URI = _env("GOOGLE_OAUTH_AUTH_URI", "https://accounts.google.com/o/oauth2/v2/auth")
+OAUTH_TOKEN_URI = _env("GOOGLE_OAUTH_TOKEN_URI", "https://oauth2.googleapis.com/token")
+# Redirect URI for the one-time `login` consent exchange (must match a URI
+# registered on the OAuth client when it's a Web-application type).
+OAUTH_REDIRECT_URI = _env("GOOGLE_OAUTH_REDIRECT_URI", "http://localhost:8765/callback")
+# Cached access token + expiry. Lives in STATE_DIR (gitignored, persisted on the
+# data volume) so every fetcher process shares one refresh.
+TOKEN_STATE = STATE_DIR / "token.json"
+# Refresh this many seconds before the real expiry to avoid edge-of-expiry 401s.
+OAUTH_REFRESH_LEEWAY_SECONDS = int(_env("GOOGLE_OAUTH_REFRESH_LEEWAY", "60"))
 
 # --------------------------------------------------------------------------- #
 # Rate limiting.  Google Health rejects with 429 once quota is exceeded; the
@@ -151,3 +173,7 @@ FETCHERS: dict[str, Fetcher] = {
         "location",
     ]),
 }
+
+# The full read-only scope set FitLit needs — every distinct scope across the
+# fetchers above.  `fitlit/auth.py login` requests exactly these during consent.
+SCOPES: list[str] = sorted({f.scope for f in FETCHERS.values()})

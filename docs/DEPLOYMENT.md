@@ -17,8 +17,8 @@ fresh for a lifetime of polling.
 | Rate limiting | ✅ done |
 | Pydantic models + SQLite storage | ✅ done |
 | FastAPI server + Dockerfile | ✅ done |
-| **Get a Google OAuth token (consent flow)** | ⬜ **TODO — manual, one-time** |
-| **OAuth refresh handling in code** | ⬜ **TODO — must build** |
+| **Get a Google OAuth token (consent flow)** | ⬜ **TODO — manual, one-time** (now one command: `fitlit.auth login`) |
+| OAuth refresh handling in code | ✅ done — [`fitlit/auth.py`](../fitlit/auth.py) |
 | Run on the VM (systemd) | ⬜ TODO |
 
 ---
@@ -53,8 +53,30 @@ chosen `PORT`, e.g. 8000). For a private/cron-only setup you don't need this.
 
 FitLit targets the **Google Health API**, which uses **Google OAuth 2.0**.
 Access tokens are **short-lived (~1 hour)**; a refresh token is long-lived and
-is what we exchange for new access tokens. This is a one-time manual setup to
-get the first refresh token, then the code (section 4) keeps it fresh.
+is what we exchange for new access tokens. This is a **one-time** manual setup to
+get the first refresh token, then the code (section 4) keeps it fresh forever —
+you do **not** re-consent on every run.
+
+**Why OAuth and not a service account / API key?** Fitbit/Google Health
+*personal* data belongs to the end user's Google account, so reading it legally
+requires that user's OAuth consent. Service accounts (incl. domain-wide
+delegation, which is Workspace-only) and API keys **cannot** access a consumer
+`@gmail.com` account's health data. OAuth-with-refresh is the only viable path —
+and it's a "set it once, runs 24/7" credential, which is exactly what we want.
+
+> ### ⚠️ Two things that decide whether 24/7 actually lasts
+>
+> 1. **Publish the OAuth app to "Production".** While the OAuth consent screen is
+>    in **"Testing"** publishing status, Google **expires refresh tokens after 7
+>    days** — the service would silently die after a week. In Cloud Console →
+>    **OAuth consent screen → Publishing status → "PUBLISH APP"**. For a personal
+>    app with just yourself as the user you can publish without full verification
+>    (you may see an "unverified app" warning at consent — click through as the
+>    owner). Do this **before** minting the refresh token below.
+> 2. **The refresh token is portable.** It isn't tied to a machine. Mint it
+>    wherever a browser is easy (your laptop — see 2c) and paste it into the VM's
+>    `.env`. A Production-mode refresh token then lives indefinitely (only dies on
+>    revoke, 6-month inactivity, or password change).
 
 ### 2a. Google Cloud Console (one-time, in a browser)
 
@@ -70,8 +92,11 @@ get the first refresh token, then the code (section 4) keeps it fresh.
    - `https://www.googleapis.com/auth/googlehealth.location.readonly`
 4. Add yourself as a **test user** (while the app is unverified).
 5. **Create an OAuth client ID** (type *Web application* or *Desktop app*).
-   Note the **Client ID** and **Client secret**. If Web, add a redirect URI
-   (e.g. `http://localhost:8765/callback` for the local exchange).
+   Note the **Client ID** and **Client secret**. If Web, add the redirect URI
+   `http://localhost:8765/callback` (must match exactly — Google rejects raw
+   public IPs; only `http://localhost`/`127.0.0.1` may be plain `http`).
+6. **Publish the app to Production** (Publishing status → "PUBLISH APP") so the
+   refresh token doesn't expire in 7 days — see the ⚠️ note above.
 
 ### 2b. Authorize once and capture the refresh token
 
@@ -102,8 +127,35 @@ curl -s https://oauth2.googleapis.com/token \
 The JSON response contains `access_token` (use now) and **`refresh_token`**
 (save this — it's the durable credential).
 
-> We'll add a tiny helper (`uv run python -m fitlit.auth login`) to automate
-> 2b so you don't curl by hand — see section 4.
+> **Easier:** instead of curling by hand, once `GOOGLE_HEALTH_CLIENT_ID` and
+> `GOOGLE_HEALTH_CLIENT_SECRET` are in `.env`, run
+> `uv run python -m fitlit.auth login`. It prints the consent URL, takes the
+> `code` from the redirect, exchanges it, caches the access token, and prints
+> the `GOOGLE_HEALTH_REFRESH_TOKEN=` line to paste into `.env`. This is the
+> built helper described in section 4.
+
+### 2c. Recommended for a headless VM: mint the token on your laptop
+
+The consent redirect goes to `http://localhost:8765/...`, which only resolves on
+the machine running the browser. On a **headless VM there is no browser**, and
+pointing Google at the VM's public IP doesn't work (Google forbids non-localhost
+`http` and raw-IP redirect URIs). Two ways to bridge that — the second is what we
+landed on as simplest:
+
+- **SSH tunnel.** Run a local listener on the VM and forward your laptop's port
+  to it: `ssh -N -L 8765:localhost:8765 <vm>`, then approve in the laptop browser
+  — the redirect tunnels back to the VM and the code is captured there.
+- **Mint on the laptop, paste the token (simplest).** Because the refresh token
+  is **portable**, just do the whole consent flow on your laptop (browser +
+  `localhost:8765` are the same machine, so the redirect resolves instantly — no
+  tunnel, no hanging consent page). Then copy the resulting
+  `GOOGLE_HEALTH_REFRESH_TOKEN=...` value and paste it into the **VM's** `.env`.
+  Clone the repo on the laptop and run `uv run python -m fitlit.auth login` (or
+  the auto-capturing `scripts/oauth_capture.py`), grab the printed token, done.
+
+Either way the VM only ever needs the three values in its `.env`
+(`GOOGLE_HEALTH_CLIENT_ID`, `GOOGLE_HEALTH_CLIENT_SECRET`,
+`GOOGLE_HEALTH_REFRESH_TOKEN`); it never has to run a browser.
 
 ---
 
@@ -116,60 +168,61 @@ cp .env.example .env
 nano .env
 ```
 
-Fill in:
+Fill in the **OAuth refresh** set (the recommended, unattended-safe path — the
+service mints access tokens itself):
 
 ```ini
-# Works today (the access token the client sends as the Bearer):
-GOOGLE_HEALTH_ACCESS_TOKEN=<access_token from step 2b>
-GOOGLE_HEALTH_USER=me
-
-# Needed for refresh (section 4 will consume these):
 GOOGLE_HEALTH_CLIENT_ID=<client id>
 GOOGLE_HEALTH_CLIENT_SECRET=<client secret>
-GOOGLE_HEALTH_REFRESH_TOKEN=<refresh_token from step 2b>
+GOOGLE_HEALTH_REFRESH_TOKEN=<refresh_token from step 2b / `auth login`>
+GOOGLE_HEALTH_USER=me
 
 # Persistence + server (see .env.example for the full list)
 FITLIT_DATA_DIR=./data
 # PORT=8000
 ```
 
-Verify the token is seen and a real call is attempted:
+(For a quick one-off you can instead set just `GOOGLE_HEALTH_ACCESS_TOKEN=<token>`
+— but it expires in ~1h and does **not** self-renew, so it's not for a service.)
+
+Verify a real call is attempted and the token refreshes automatically:
 
 ```bash
-uv run python -m fitlit.fetchers.heart   # should make a real request now
+uv run python -m fitlit.auth token       # prints a freshly-minted access token
+uv run python -m fitlit.fetchers.heart   # makes a real request, refreshing as needed
 uv run python scripts/seed_dummy_data.py # or seed dummy rows to eyeball the DB
 sqlite3 data/db/heart.db "SELECT COUNT(*) FROM heartRate;"
 ```
 
-⚠️ With **only** `GOOGLE_HEALTH_ACCESS_TOKEN` set, it works until the token
-expires (~1h), then every call 401s. That's why section 4 is required for a
-service that runs unattended.
+The minted access token is cached at `data/state/token.json` (mode `600`) and
+shared across all fetcher processes; it's refreshed ~60s before expiry.
 
 ---
 
-## 4. TODO — build OAuth refresh into the code
+## 4. OAuth refresh in the code  ✅ done
 
-This is the one real code task left. Plan:
+Built in [`fitlit/auth.py`](../fitlit/auth.py). How it works:
 
-1. **`fitlit/auth.py`** — a small token manager that:
-   - reads `GOOGLE_HEALTH_CLIENT_ID`, `GOOGLE_HEALTH_CLIENT_SECRET`,
-     `GOOGLE_HEALTH_REFRESH_TOKEN`;
-   - caches the current access token + its expiry under
-     `data/state/token.json`;
-   - `get_access_token()` returns a valid token, transparently refreshing via
-     `POST https://oauth2.googleapis.com/token` with
-     `grant_type=refresh_token` when it's within ~60s of expiry.
-   - a `login` CLI subcommand that runs the section-2b consent exchange and
-     writes the refresh token, so onboarding is one command.
-2. **`fitlit/client.py`** — replace the static `config.ACCESS_TOKEN` read with
-   `auth.get_access_token()` per request (cheap; it's cached), and on a `401`
-   force one refresh + retry before giving up.
-3. **`config.py`** — add the three new env vars (client id/secret/refresh).
-4. The token cache (`data/state/token.json`) holds a live credential → keep it
-   gitignored (the `data/state/` rule already covers it) and `chmod 600`.
+- **`auth.get_access_token()`** returns a currently-valid token. It serves a
+  cached token from `data/state/token.json` while fresh, and otherwise refreshes
+  via `POST https://oauth2.googleapis.com/token` (`grant_type=refresh_token`),
+  ~60s before expiry (`GOOGLE_OAUTH_REFRESH_LEEWAY`). The refresh runs under an
+  `fcntl` exclusive lock with a cache re-check, so the eight fetcher processes
+  share one refresh instead of stampeding Google's endpoint. The cache file is
+  written `0600` (it holds a live credential) and lives under `data/state/`
+  (gitignored, and on the persistent data volume).
+- **`fitlit/client.py`** fetches a token per request (cheap — cached) and on a
+  `401` forces exactly one refresh + retry before giving up.
+- **`auth.is_configured()`** backs `GET /ready` (and `/status`'s
+  `token_configured`): ready once either OAuth refresh creds *or* a static token
+  is present.
+- **`python -m fitlit.auth login`** runs the section-2b consent exchange end to
+  end and prints the `GOOGLE_HEALTH_REFRESH_TOKEN=` line to paste into `.env`.
+  **`python -m fitlit.auth token`** prints a freshly-minted access token (debug).
 
-Until this lands, a stopgap is a cron job that refreshes the access token and
-rewrites `.env` hourly — but building `auth.py` is the right fix.
+Fallback: if no refresh creds are set but `GOOGLE_HEALTH_ACCESS_TOKEN` is, that
+static token is used as-is (can't self-renew). Configure refresh for any
+unattended run.
 
 ---
 

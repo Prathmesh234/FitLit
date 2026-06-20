@@ -7,9 +7,10 @@ the unified ``users.dataTypes.dataPoints`` design:
 
 Responsibilities kept here so the fetchers stay trivial:
 
-    * attach the OAuth Bearer token (assumed present, read from .env),
+    * attach a valid OAuth Bearer token (minted/refreshed by ``fitlit.auth``),
     * pass through the shared rate limiter before every call,
     * honour 429 / Retry-After with a bounded retry/backoff,
+    * refresh the token once and retry on a 401 (expired access token),
     * follow pagination so a whole window is captured, and
     * upsert every data point into the fetcher's SQLite database.
 
@@ -27,7 +28,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-from fitlit import config, ratelimit, storage
+from fitlit import auth, config, ratelimit, storage
 
 log = logging.getLogger("fitlit.client")
 
@@ -36,7 +37,7 @@ _DEFAULT_BACKOFF = 5  # seconds, used when a 429 carries no Retry-After
 
 
 class MissingTokenError(RuntimeError):
-    """Raised when no access token is configured."""
+    """Raised when no access token can be obtained (none configured / no refresh)."""
 
 
 def _camel_to_kebab(name: str) -> str:
@@ -51,7 +52,6 @@ def _camel_to_kebab(name: str) -> str:
 class GoogleHealthClient:
     def __init__(self, fetcher_name: str) -> None:
         self.fetcher_name = fetcher_name
-        self.token = config.ACCESS_TOKEN
         self.user = config.API_USER
 
     # ------------------------------------------------------------------ #
@@ -63,11 +63,10 @@ class GoogleHealthClient:
         stored, or ``None`` if the very first request failed (logged, never
         raised, so one bad type can't sink the sweep).
         """
-        if not self.token:
-            raise MissingTokenError(
-                "GOOGLE_HEALTH_ACCESS_TOKEN is not set — copy .env.example to .env "
-                "and fill it in."
-            )
+        try:
+            auth.get_access_token()  # fail fast + clear message if unconfigured
+        except auth.AuthError as exc:
+            raise MissingTokenError(str(exc)) from exc
 
         path = f"/v4/users/{urllib.parse.quote(self.user)}/dataTypes/{_camel_to_kebab(data_type)}/dataPoints"
         base = f"{config.BASE_URL}{path}"
@@ -97,13 +96,19 @@ class GoogleHealthClient:
 
     # ------------------------------------------------------------------ #
     def _get_with_retry(self, url: str, data_type: str) -> dict | None:
+        refreshed = False  # only force a token refresh once per request
         for attempt in range(1, _MAX_RETRIES + 1):
             ratelimit.acquire()  # shared budget — blocks if we're at the per-minute cap
+            try:
+                token = auth.get_access_token(force_refresh=refreshed)
+            except auth.AuthError as exc:
+                log.error("auth %-28s %s", data_type, exc)
+                return None
             req = urllib.request.Request(
                 url,
                 method="GET",
                 headers={
-                    "Authorization": f"Bearer {self.token}",
+                    "Authorization": f"Bearer {token}",
                     "Accept": "application/json",
                 },
             )
@@ -115,6 +120,11 @@ class GoogleHealthClient:
                     wait = int(exc.headers.get("Retry-After") or _DEFAULT_BACKOFF)
                     log.warning("429 %-28s retry in %ss (attempt %d)", data_type, wait, attempt)
                     time.sleep(wait)
+                    continue
+                # 401 = expired/invalid access token. Force one refresh + retry.
+                if exc.code == 401 and not refreshed and attempt < _MAX_RETRIES:
+                    log.warning("401 %-28s refreshing token + retrying", data_type)
+                    refreshed = True
                     continue
                 log.error("http %-28s %s %s", data_type, exc.code, exc.reason)
                 return None
