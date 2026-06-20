@@ -17,9 +17,15 @@ fresh for a lifetime of polling.
 | Rate limiting | ✅ done |
 | Pydantic models + SQLite storage | ✅ done |
 | FastAPI server + Dockerfile | ✅ done |
-| **Get a Google OAuth token (consent flow)** | ⬜ **TODO — manual, one-time** (now one command: `fitlit.auth login`) |
+| Get a Google OAuth token (consent flow) | ✅ done — refresh token captured, live data flowing |
 | OAuth refresh handling in code | ✅ done — [`fitlit/auth.py`](../fitlit/auth.py) |
-| Run on the VM (systemd) | ⬜ TODO |
+| Run on the VM (systemd) | ✅ done — `fitlit.service` enabled + running |
+
+**FitLit is live on the VM as of 2026-06-20.** ~12 data types are actively
+captured (heartRate, steps, distance, active/zone minutes, activityLevel,
+sedentaryPeriod, timeInHeartRateZone, dailyHeartRateZones, weight, height,
+sleep). See [§7 Known issues & scaling](#7-known-issues--scaling-roadmap) for the
+data types still returning `400` and the SQLite growth plan.
 
 ---
 
@@ -226,12 +232,11 @@ unattended run.
 
 ---
 
-## 5. Run it 24/7 on the VM (systemd)
+## 5. Run it 24/7 on the VM (systemd)  ✅ installed
 
-Once a valid token is in place, run the all-in-one server (API + background
-scheduler) under systemd so it restarts on crash/reboot.
-
-Create `/etc/systemd/system/fitlit.service` (adjust `User` and paths):
+The all-in-one server (API + background scheduler) runs under systemd so it
+restarts on crash/reboot. **This is already installed and running on the VM** at
+`/etc/systemd/system/fitlit.service`:
 
 ```ini
 [Unit]
@@ -242,7 +247,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=azureuser
-WorkingDirectory=/home/azureuser/fitlit
+WorkingDirectory=/home/azureuser/FitLit
 # uv reads .env via the app; EnvironmentFile is optional/redundant.
 ExecStart=/home/azureuser/.local/bin/uv run uvicorn fitlit.server:app --host 0.0.0.0 --port 8000
 Restart=always
@@ -252,14 +257,19 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+Day-to-day management:
+
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now fitlit
-sudo systemctl status fitlit
-journalctl -u fitlit -f          # follow logs
-curl http://localhost:8000/status
-curl http://localhost:8000/stats
+sudo systemctl status fitlit        # is it up?
+sudo systemctl restart fitlit       # after a git pull / .env change
+journalctl -u fitlit -f             # follow logs
+curl http://localhost:8000/status   # scheduler state + rate-limit budget
+curl http://localhost:8000/stats    # stored row counts per type per DB
 ```
+
+> To reach the API from outside the VM, open the port (8000) in the Azure NSG.
+> Currently bound to `0.0.0.0:8000` but only reachable locally unless that
+> inbound rule is added.
 
 Alternative (cron-only, no API): a `@reboot` entry running
 `uv run python -m fitlit.orchestrator` — see [`crontab.example`](../crontab.example).
@@ -270,13 +280,71 @@ Alternative (cron-only, no API): a `@reboot` entry running
 
 | Var | Used now? | Purpose |
 |---|---|---|
-| `GOOGLE_HEALTH_ACCESS_TOKEN` | ✅ | Bearer token the client sends |
+| `GOOGLE_HEALTH_ACCESS_TOKEN` | optional | Static bearer token (fallback / testing; can't self-renew) |
 | `GOOGLE_HEALTH_USER` | ✅ | `me` or explicit user id |
-| `GOOGLE_HEALTH_CLIENT_ID` | ⬜ (section 4) | OAuth client id, for refresh |
-| `GOOGLE_HEALTH_CLIENT_SECRET` | ⬜ (section 4) | OAuth client secret, for refresh |
-| `GOOGLE_HEALTH_REFRESH_TOKEN` | ⬜ (section 4) | Long-lived token to mint access tokens |
+| `GOOGLE_HEALTH_CLIENT_ID` | ✅ | OAuth client id, for refresh |
+| `GOOGLE_HEALTH_CLIENT_SECRET` | ✅ | OAuth client secret, for refresh |
+| `GOOGLE_HEALTH_REFRESH_TOKEN` | ✅ | Long-lived token to mint access tokens |
 | `FITLIT_DATA_DIR` | ✅ | Where SQLite DBs + state live |
 | `FITLIT_SQLITE_JOURNAL` | ✅ | `WAL` (local disk) / `DELETE` (network share) |
 | `PORT` / `HOST` | ✅ | Server bind |
 | `FITLIT_RUN_SCHEDULER` | ✅ | Run the scheduler in-process (default true) |
 | `FITLIT_TICK_SECONDS` | ✅ | Orchestrator tick (default 10) |
+
+---
+
+## 7. Known issues & scaling roadmap
+
+Captured from the first live run on the VM (2026-06-20). None of these block
+data capture today — they're the next workstreams.
+
+### 7a. Some data types return `400 Bad Request`
+
+These 9 types are currently rejected by the API and skipped (logged, never fatal):
+`totalCalories`, `floors`, `caloriesInHeartRateZone`, `bodyTemperature`,
+`sleepSummary`, `location`, `ecgMeasurement`, `ecgRhythmClassification`,
+`afibAnalysisWindow`.
+
+Meanwhile `heartRate`, `steps`, `distance`, `activeMinutes`, `activeZoneMinutes`,
+`activityLevel`, `sedentaryPeriod`, `timeInHeartRateZone`, `dailyHeartRateZones`,
+`weight`, `height`, `sleep` all work. Since it's per-type (not auth/scope —
+those would be `401`/`403`), the likely cause is the camelCase→kebab path
+mapping in [`client.py`](../fitlit/client.py) (`_camel_to_kebab`) not matching
+the API's dataType segment for these types, or a required query parameter (e.g.
+a time range) the `dataPoints.list` call omits for them. **TODO:** verify each
+failing type's exact path/params against the Google Health API and fix the
+mapping (cross-check [`docs/fitbit-api-research.md`](fitbit-api-research.md)).
+
+Also note: `heartRate` (and other **Sample**-shaped types) carry their timestamp
+in `data.sampleTime.physicalTime`, not a `startTime`/`endTime` envelope — so the
+typed `start_time` column is empty for them (the value is still fully captured in
+`data_json`/`raw_json`). Mapping `sampleTime → start_time` would make the
+`start_time` index useful for those types too.
+
+### 7b. Keeping SQLite from getting overloaded
+
+The DB is small today (~3 MB) with plenty of disk, but two design facts drive
+unbounded growth/cost over a lifetime of polling. Levers, highest leverage first:
+
+1. **Incremental fetch windows (do first).** Every fetcher currently pulls the
+   *entire* available history each cycle (`list_data_points` sends no time
+   filter), then dedups via `INSERT … ON CONFLICT(name)`. That's why the first
+   `heart` run took ~2.5 min and exhausted the 100/min rate budget. Persist each
+   fetcher's last-success time and pass a `startTime`/`endTime` (or "since")
+   filter so each run pulls only *new* points. Cuts runtime, API quota, and write
+   churn dramatically. (Doesn't shrink final size — same unique points — but
+   stops the wasteful re-scan.)
+2. **Drop redundant `data_json`.** Each row stores both `data_json` (the type
+   sub-object) and `raw_json` (the whole point, a superset). Keeping only
+   `raw_json` roughly halves text storage with no loss.
+3. **Partition + archive for lifetime scale.** Respect the "never drop a field"
+   guarantee without unbounded single files: roll a DB per month
+   (`heart_2026_06.db`), and/or archive cold partitions to compressed
+   JSONL/Parquet on disk or blob storage; keep recent hot in SQLite. Run periodic
+   `PRAGMA wal_checkpoint` + `VACUUM` to reclaim space.
+4. **Graduate the store if volume demands it.** At sustained high-frequency
+   capture (heartRate can be tens of thousands of points/day), a time-series
+   engine (TimescaleDB/Postgres, DuckDB, or partitioned Parquet) scales better
+   than SQLite for analytics. SQLite is fine for now given per-fetcher DBs +
+   indexes; the risks to watch are disk fill, WAL bloat, and query latency as
+   tables reach millions of rows.

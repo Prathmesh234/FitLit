@@ -17,8 +17,12 @@ often, and under which scopes.
 | 3. Design + build the cron fetcher | ✅ done — see [The fetcher](#the-fetcher) below |
 | 4. FastAPI server for 24/7 / container | ✅ done — see [The server](#the-server-247) below |
 | 5. Pydantic models + SQLite persistence | ✅ done — see [Storage](#storage-pydantic--sqlite) below |
-| 6. Deploy + OAuth on a VM | ⬜ in progress — see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
+| 6. Deploy + OAuth on a VM | ✅ done — live under systemd; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | 7. Implement OAuth token refresh | ✅ done — [`fitlit/auth.py`](fitlit/auth.py), [`docs/DEPLOYMENT.md` §4](docs/DEPLOYMENT.md) |
+
+> **Live as of 2026-06-20** on an Azure VM. Known follow-ups (some data types
+> return `400`; SQLite growth plan) are tracked in
+> [`docs/DEPLOYMENT.md` §7](docs/DEPLOYMENT.md).
 
 ## The fetcher
 
