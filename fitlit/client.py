@@ -62,6 +62,17 @@ def _civil_date_str(civil: dict | None) -> str | None:
     return f"{year:04d}-{month:02d}-{day:02d}"
 
 
+def _rfc3339(dt: datetime) -> str:
+    """A datetime → RFC-3339 UTC string (e.g. '2026-06-21T19:00:00Z').
+
+    The ``rollUp`` range uses Timestamp-shaped bounds (unlike ``dailyRollUp``,
+    which uses civil dates). Naive datetimes are assumed to be UTC.
+    """
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _api_error_message(exc: urllib.error.HTTPError) -> str:
     """Pull the human-readable reason out of a Google API error response.
 
@@ -132,6 +143,59 @@ class GoogleHealthClient:
 
         log.info("stored %-28s %d points", data_type, stored)
         return stored
+
+    # ------------------------------------------------------------------ #
+    def roll_up(
+        self,
+        data_type: str,
+        start: datetime,
+        end: datetime,
+        window_seconds: int = 3600,
+    ) -> list[dict] | None:
+        """On-demand aggregation via ``dataPoints:rollUp`` (does not persist).
+
+        Groups a data type into fixed ``window_seconds`` windows over a
+        ``[start, end)`` range and returns the aggregated windows — e.g. hourly
+        step sums for a day, or 5-minute heart-rate averages for a workout. This
+        is the read-side counterpart to the fetchers: it answers analytics
+        questions the raw per-point tables make expensive, straight from the API.
+
+        Returns a list of ``{"start_time", "end_time", <value>}`` dicts, or
+        ``None`` if the request failed (logged, never raised). The API caps the
+        range at 14 days for high-frequency types (heart-rate, steps,
+        active-minutes, total-calories) and 90 days otherwise.
+        """
+        try:
+            auth.get_access_token()
+        except auth.AuthError as exc:
+            raise MissingTokenError(str(exc)) from exc
+
+        path = f"/v4/users/{urllib.parse.quote(self.user)}/dataTypes/{_camel_to_kebab(data_type)}/dataPoints:rollUp"
+        url = f"{config.BASE_URL}{path}"
+        request = {
+            "range": {"startTime": _rfc3339(start), "endTime": _rfc3339(end)},
+            "windowSize": f"{int(window_seconds)}s",
+            "pageSize": config.PAGE_SIZE,
+        }
+
+        windows: list[dict] = []
+        page_token: str | None = None
+        first = True
+        while True:
+            if page_token:
+                request["pageToken"] = page_token
+            body = self._request_with_retry(url, data_type, json_body=request)
+            if body is None:
+                return None if first else windows
+            first = False
+
+            windows.extend(body.get("rollupDataPoints") or [])
+            page_token = body.get("nextPageToken")
+            if not page_token:
+                break
+
+        log.info("rolled up %-26s %d windows (%ss)", data_type, len(windows), window_seconds)
+        return windows
 
     # ------------------------------------------------------------------ #
     def daily_rollup_data_points(self, data_type: str) -> int | None:
