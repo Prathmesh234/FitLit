@@ -29,9 +29,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from pydantic import BaseModel
 
-from fitlit import auth, config, orchestrator, ratelimit, storage
-from fitlit.client import MissingTokenError
+from fitlit import auth, config, insights, journal, orchestrator, ratelimit, storage
+from fitlit.client import GoogleHealthClient, MissingTokenError
 from fitlit.fetchers.base import fetch_once
 
 logging.basicConfig(
@@ -106,7 +107,10 @@ def root() -> dict:
         "scheduler_running": _scheduler_alive(),
         "tick_seconds": config.TICK_SECONDS,
         "fetchers": list(config.FETCHERS),
-        "endpoints": ["/health", "/ready", "/fetchers", "/status", "/stats", "/fetchers/{name}/run"],
+        "endpoints": ["/health", "/ready", "/fetchers", "/status", "/stats",
+                      "/fetchers/{name}/run", "/insights", "/insights/weight",
+                      "/insights/sleep", "/insights/activity", "/journal",
+                      "/journal/weight", "/aggregate/{data_type}"],
     }
 
 
@@ -148,6 +152,90 @@ async def run_fetcher_now(name: str) -> dict:
         return await run_in_threadpool(fetch_once, name)
     except MissingTokenError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# Analytics — read-only coaching insights over the fetcher DBs + journal.
+# --------------------------------------------------------------------------- #
+@app.get("/insights")
+def insights_briefing(date: str | None = None) -> dict:
+    """One cross-domain daily briefing (weight, sleep, activity, energy balance)."""
+    return insights.daily_briefing(date)
+
+
+@app.get("/insights/weight")
+def insights_weight(days: int = 30, fasted_only: bool = False) -> dict:
+    """Weight series + 7-day moving average from the journal."""
+    return insights.weight_trend(days, fasted_only=fasted_only)
+
+
+@app.get("/insights/sleep")
+def insights_sleep(days: int = 14) -> dict:
+    """Per-night sleep duration / efficiency from the wearable data."""
+    return insights.sleep_trend(days)
+
+
+@app.get("/insights/activity")
+def insights_activity(days: int = 7) -> dict:
+    """Dedup-safe daily steps + calories-out."""
+    return insights.activity_summary(days)
+
+
+# --------------------------------------------------------------------------- #
+# Journal — the writable, user-owned log.
+# --------------------------------------------------------------------------- #
+class WeighIn(BaseModel):
+    weight_lb: float | None = None
+    weight_kg: float | None = None
+    conditions: str = "unspecified"
+    date: str | None = None
+    weighed_at: str | None = None
+    note: str | None = None
+
+
+@app.get("/journal")
+def journal_summary() -> dict:
+    """Row counts per journal table + recent weigh-ins."""
+    return {"counts": journal.summary(), "recent_weights": journal.recent_weights(7)}
+
+
+@app.post("/journal/weight")
+def journal_log_weight(entry: WeighIn) -> dict:
+    """Record a weigh-in into the user-owned journal."""
+    try:
+        return journal.log_weight(
+            weight_lb=entry.weight_lb, weight_kg=entry.weight_kg,
+            conditions=entry.conditions, date=entry.date,
+            weighed_at=entry.weighed_at, note=entry.note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# On-demand aggregation — straight from the Google Health rollUp API.
+# --------------------------------------------------------------------------- #
+@app.get("/aggregate/{data_type}")
+async def aggregate(data_type: str, hours: int = 24, window_seconds: int = 3600) -> dict:
+    """Roll up a data type into fixed windows over the trailing ``hours``.
+
+    e.g. ``/aggregate/steps?hours=24&window_seconds=3600`` → hourly step sums;
+    ``/aggregate/heartRate?hours=2&window_seconds=300`` → 5-min HR avg/min/max.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    end = datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    client = GoogleHealthClient("aggregate")
+    try:
+        windows = await run_in_threadpool(
+            client.roll_up, data_type, start, end, window_seconds)
+    except MissingTokenError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    if windows is None:
+        raise HTTPException(status_code=502, detail=f"rollUp failed for {data_type!r}")
+    return {"data_type": data_type, "hours": hours, "window_seconds": window_seconds,
+            "windows": windows}
 
 
 def main() -> None:
