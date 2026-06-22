@@ -70,7 +70,8 @@ def weight_trend(days: int = 30, *, fasted_only: bool = False) -> dict:
     rows = journal.recent_weights(limit=max(days * 3, 60))
     points: dict[str, dict] = {}
     for r in rows:  # rows are newest-first; keep the first (latest) per day
-        if fasted_only and "fasted" not in (r.get("conditions") or "").lower():
+        cond = (r.get("conditions") or "").lower()
+        if fasted_only and not ("fasted" in cond and "not fasted" not in cond):
             continue
         points.setdefault(r["date"], r)
     series = sorted(points.values(), key=lambda r: r["date"])
