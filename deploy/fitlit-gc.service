@@ -1,0 +1,49 @@
+# FitLit garbage-collector daemon (systemd unit).
+#
+# Runs the lossless archive+prune GC (fitlit.gc_daemon) as a long-lived service,
+# so the fetcher SQLite databases never fill the disk. This is the storage-side
+# companion to the fetcher service (fitlit.service): the fetchers keep data
+# flowing in; this keeps the on-disk footprint bounded.
+#
+# Install:
+#   sudo cp deploy/fitlit-gc.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now fitlit-gc.service
+#   journalctl -u fitlit-gc -f          # watch it work
+#
+# Adjust User, WorkingDirectory, and the uv path to match your deployment.
+
+[Unit]
+Description=FitLit lossless garbage-collector daemon (archive + prune SQLite)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=azureuser
+WorkingDirectory=/home/azureuser/FitLit
+
+# Keep 7 days of raw rows hot; consolidate older data into the gzip archive.
+Environment=FITLIT_GC_INTERVAL_SECONDS=21600
+# If FitLit's data lives on a mounted volume, set it here too (must match the
+# fetcher service so the GC operates on the same databases):
+# Environment=FITLIT_DATA_DIR=/mnt/fitlit/data
+
+ExecStart=/home/azureuser/.local/bin/uv run python -m fitlit.gc_daemon --older-than 7
+
+# Give an in-progress sweep time to finish its current batch on stop. The GC
+# commits per batch and archives before deleting, so even SIGKILL is safe — this
+# just lets a clean SIGTERM exit gracefully.
+KillSignal=SIGTERM
+TimeoutStopSec=120
+
+Restart=on-failure
+RestartSec=30
+
+# Hardening — the GC only needs to read/write FitLit's own data directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
