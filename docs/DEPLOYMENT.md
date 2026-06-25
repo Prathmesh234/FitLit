@@ -345,6 +345,13 @@ typed `start_time` column is empty for them (the value is still fully captured i
 
 ### 7b. Keeping SQLite from getting overloaded
 
+> **Update 2026-06-25.** Point 3 (archive cold data) is now implemented as a
+> lossless GC daemon — see **[§7c](#7c-garbage-collector-daemon)**. Point 1
+> (incremental fetch) remains the highest-leverage open item: with full-history
+> re-fetching, `live_activity.db` grew to ~25 GB in 6 days and filled a 31 GB
+> disk. Until it lands, run the GC with a short `--older-than` (e.g. 1 day) to
+> keep the footprint bounded.
+
 The DB is small today (~3 MB) with plenty of disk, but two design facts drive
 unbounded growth/cost over a lifetime of polling. Levers, highest leverage first:
 
@@ -370,6 +377,30 @@ unbounded growth/cost over a lifetime of polling. Levers, highest leverage first
    than SQLite for analytics. SQLite is fine for now given per-fetcher DBs +
    indexes; the risks to watch are disk fill, WAL bloat, and query latency as
    tables reach millions of rows.
+
+### 7c. Garbage-collector daemon
+
+[`fitlit/gc.py`](../fitlit/gc.py) + [`fitlit/gc_daemon.py`](../fitlit/gc_daemon.py)
+implement a **lossless** archive-and-prune GC, deployed via
+[`deploy/fitlit-gc.service`](../deploy/fitlit-gc.service). For data older than a
+threshold it: (1) archives every row — all columns incl. `raw_json` — to
+`data/archive/<fetcher>/<data_type>.jsonl.gz`; (2) verifies the archived line
+count equals the rows selected before deleting anything; (3) consolidates each
+archived `(data_type, UTC-day)` into one `_gc_summary` row; (4) prunes the
+archived rows and `VACUUM`s to return space to the OS. `gc.restore_archive()` is
+the exact inverse, so the operation is fully reversible.
+
+```bash
+uv run python -m fitlit.gc_daemon --dry-run            # report, change nothing
+uv run python -m fitlit.gc_daemon --once --older-than 1  # one sweep, keep 1 day hot
+sudo systemctl enable --now fitlit-gc.service          # run it as a daemon
+```
+
+**Caveat on a full disk.** `VACUUM` and lossless archiving both need free space;
+if the disk is already full, free a little first (or migrate to a larger disk),
+then run the GC. Because the data here is still <7 days old, the *immediate*
+bloat is intra-day re-fetch duplication, not aged data — so pair the GC with the
+§7b point 1 incremental-fetch fix for a permanent solution.
 
 ---
 
