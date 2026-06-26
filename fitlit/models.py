@@ -29,6 +29,8 @@ models, so the models are the single source of truth for the schema.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import typing
 from datetime import datetime
 from typing import Any, ClassVar, Optional
@@ -124,6 +126,24 @@ class DataPoint(BaseModel):
         """
         return {}
 
+    @staticmethod
+    def _synthetic_name(data_type: str, point: dict, times: dict) -> str:
+        """A *deterministic* natural key for points the API returns without a ``name``.
+
+        Some Google Health data types (e.g. ``steps``) come back with no ``name``
+        field. Earlier this fell back to ``id(point)`` — a Python memory address
+        that changes every fetch — so re-fetching the same point created a brand-new
+        row each cycle and the ``ON CONFLICT(name)`` upsert never deduped (one day
+        of steps ballooned to ~1.9M rows for ~1.5k real points). Hashing the point's
+        content instead makes identical points collapse to the same key across
+        fetches, while genuinely different points at the same timestamp still get
+        distinct keys. No field is lost — the full point still lives in ``raw_json``.
+        """
+        digest = hashlib.sha1(
+            json.dumps(point, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        return f"{data_type}/{times.get('start_time')}/{digest}"
+
     @classmethod
     def from_raw(cls, data_type: str, point: dict, fetched_at: datetime) -> "DataPoint":
         data = point.get(data_type)
@@ -131,7 +151,7 @@ class DataPoint(BaseModel):
             data = {}
         times = _extract_times(data)
         source = DataSource.from_raw(point.get("dataSource"))
-        name = point.get("name") or f"{data_type}/{times.get('start_time')}/{id(point)}"
+        name = point.get("name") or cls._synthetic_name(data_type, point, times)
         return cls(
             name=name,
             data_type=data_type,
