@@ -22,6 +22,7 @@ credentials.json
 # FitLit runtime output (SQLite databases + scheduler/rate-limit state)
 data/db/
 data/state/
+data/archive/
 
 # Editor / OS
 .idea/
