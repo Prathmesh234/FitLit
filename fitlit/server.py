@@ -24,16 +24,21 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import pathlib
 import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from fitlit import auth, config, insights, journal, orchestrator, ratelimit, storage
+from fitlit import auth, config, dashboard, insights, journal, orchestrator, ratelimit, storage
 from fitlit.client import GoogleHealthClient, MissingTokenError
 from fitlit.fetchers.base import fetch_once
+
+_STATIC_DIR = pathlib.Path(__file__).resolve().parent.parent / "static"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -236,6 +241,28 @@ async def aggregate(data_type: str, hours: int = 24, window_seconds: int = 3600)
         raise HTTPException(status_code=502, detail=f"rollUp failed for {data_type!r}")
     return {"data_type": data_type, "hours": hours, "window_seconds": window_seconds,
             "windows": windows}
+
+
+# --------------------------------------------------------------------------- #
+# Live dashboard — one JSON snapshot + the static frontend.
+# --------------------------------------------------------------------------- #
+@app.get("/dashboard/data")
+async def dashboard_data() -> dict:
+    """Full metric snapshot powering the live dashboard (polled by the frontend)."""
+    return await run_in_threadpool(dashboard.snapshot)
+
+
+@app.get("/dashboard")
+def dashboard_page() -> FileResponse:
+    """Serve the dashboard HTML."""
+    index = _STATIC_DIR / "index.html"
+    if not index.exists():
+        raise HTTPException(status_code=404, detail="dashboard not built")
+    return FileResponse(index)
+
+
+if _STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 def main() -> None:
