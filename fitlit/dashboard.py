@@ -65,6 +65,30 @@ def _resting_hr() -> dict:
             "series": [round(x) for x in reversed(series)]}
 
 
+def _last_night_stages() -> dict | None:
+    """Stage minutes (deep/rem/light/awake) for the most recent sleep session."""
+    path = config.DB_DIR / "sleep.db"
+    if not path.exists():
+        return None
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10)
+    try:
+        row = conn.execute(
+            "SELECT data_json FROM sleep ORDER BY start_time DESC LIMIT 1").fetchone()
+        if not row:
+            return None
+        import json as _json
+        summ = (_json.loads(row[0]) or {}).get("summary", {})
+        out = {}
+        for s in summ.get("stagesSummary", []):
+            try:
+                out[s.get("type", "").lower()] = int(s.get("minutes", 0))
+            except (TypeError, ValueError):
+                pass
+        return out or None
+    finally:
+        conn.close()
+
+
 def snapshot() -> dict:
     """Full metric snapshot for the dashboard. All times Pacific."""
     now = datetime.now(PACIFIC)
@@ -75,7 +99,10 @@ def snapshot() -> dict:
     # last-night sleep convenience
     last_night = None
     if isinstance(sleep, dict) and sleep.get("nights"):
-        last_night = sleep["nights"][-1]
+        last_night = dict(sleep["nights"][-1])
+        stages = _safe(_last_night_stages)
+        if isinstance(stages, dict):
+            last_night["stages"] = stages
 
     # today's steps from the activity series
     steps_today = None
