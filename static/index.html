@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FitLit · Live</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/dashboard.css" />
+</head>
+<body>
+  <!-- Header -->
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◆</span>
+      <h1>FIT<span>LIT</span></h1>
+      <span class="goal-chip">GOAL · sub-15% BF + hypertrophy</span>
+    </div>
+    <div class="status">
+      <span id="live-dot" class="dot"></span>
+      <span id="live-label">connecting…</span>
+      <span class="sep">·</span>
+      <span id="generated">—</span>
+    </div>
+  </header>
+
+  <!-- Each .card is a self-contained component, rendered by a render*() fn in
+       dashboard.js from the /dashboard/data snapshot. They can be embedded
+       individually by lifting the markup + its render function. -->
+  <main class="grid">
+    <!-- Readiness gauge -->
+    <section class="card span-2 hero" id="card-readiness">
+      <div class="card-head"><h2>Readiness</h2><span class="tag" id="readiness-band">—</span></div>
+      <div class="readiness-body">
+        <svg class="gauge" viewBox="0 0 200 200" id="readiness-gauge"></svg>
+        <div class="readiness-side" id="readiness-components"></div>
+      </div>
+    </section>
+
+    <!-- Live heart rate -->
+    <section class="card" id="card-heart">
+      <div class="card-head"><h2>Heart Rate</h2><span class="muted" id="heart-asof">—</span></div>
+      <div class="big-metric"><span id="hr-bpm" class="num pulse">—</span><span class="unit">bpm</span></div>
+      <div class="sub" id="hr-range">—</div>
+      <svg class="spark" viewBox="0 0 300 60" id="hr-spark"></svg>
+    </section>
+
+    <!-- Steps today -->
+    <section class="card" id="card-steps">
+      <div class="card-head"><h2>Steps Today</h2><span class="muted" id="steps-avg">—</span></div>
+      <div class="big-metric"><span id="steps-num" class="num">—</span></div>
+      <div class="sub" id="steps-goal">—</div>
+      <svg class="bars" viewBox="0 0 300 70" id="steps-bars"></svg>
+    </section>
+
+    <!-- Recomposition progress -->
+    <section class="card span-2" id="card-recomp">
+      <div class="card-head"><h2>Recomposition</h2><span class="muted" id="recomp-asof">—</span></div>
+      <div class="recomp-row">
+        <div class="stat"><span class="stat-num" id="recomp-now">—</span><span class="stat-lbl">now (lb)</span></div>
+        <div class="recomp-bar-wrap">
+          <div class="recomp-bar"><div class="recomp-fill" id="recomp-fill"></div><div class="recomp-marker" id="recomp-marker"></div></div>
+          <div class="recomp-scale"><span id="recomp-startlbl">—</span><span id="recomp-targetlbl">target —</span></div>
+        </div>
+        <div class="stat"><span class="stat-num accent" id="recomp-target">—</span><span class="stat-lbl">target (lb)</span></div>
+      </div>
+      <div class="kpi-row" id="recomp-kpis"></div>
+    </section>
+
+    <!-- Sleep -->
+    <section class="card" id="card-sleep">
+      <div class="card-head"><h2>Sleep</h2><span class="muted" id="sleep-avg">—</span></div>
+      <div class="big-metric"><span id="sleep-hrs" class="num">—</span><span class="unit">h</span><span class="eff" id="sleep-eff">—</span></div>
+      <div class="stage-bars" id="sleep-stages"></div>
+      <svg class="spark" viewBox="0 0 300 50" id="sleep-spark"></svg>
+    </section>
+
+    <!-- Protein -->
+    <section class="card" id="card-protein">
+      <div class="card-head"><h2>Protein</h2><span class="muted">veg · target</span></div>
+      <div class="ring-wrap">
+        <svg class="ring" viewBox="0 0 120 120" id="protein-ring"></svg>
+        <div class="ring-center"><span id="protein-logged" class="num sm">—</span><span class="unit">/<span id="protein-target">—</span>g</span></div>
+      </div>
+      <div class="sub" id="protein-gap">—</div>
+    </section>
+
+    <!-- Resting HR trend -->
+    <section class="card" id="card-rhr">
+      <div class="card-head"><h2>Resting HR</h2><span class="muted">14-day</span></div>
+      <div class="big-metric"><span id="rhr-num" class="num">—</span><span class="unit">bpm</span><span class="trend" id="rhr-trend"></span></div>
+      <svg class="spark" viewBox="0 0 300 60" id="rhr-spark"></svg>
+    </section>
+
+    <!-- HR zones -->
+    <section class="card span-2" id="card-zones">
+      <div class="card-head"><h2>HR Zones</h2><span class="muted" id="zones-max">—</span></div>
+      <div class="zones" id="zones-list"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>FitLit · Google Health · auto-refresh <b id="refresh-rate">5s</b></span>
+    <span id="err" class="err"></span>
+  </footer>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>
