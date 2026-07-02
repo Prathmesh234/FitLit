@@ -3,107 +3,181 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FitLit · Live</title>
+  <title>FitLit</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@600;800&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:ital,wght@0,400;0,500;0,600;0,700;1,400&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/dashboard.css" />
 </head>
 <body>
-  <!-- Header -->
-  <header class="topbar">
-    <div class="brand">
-      <span class="logo">◆</span>
-      <h1>FIT<span>LIT</span></h1>
-      <span class="goal-chip">GOAL · sub-15% BF + hypertrophy</span>
-    </div>
-    <div class="status">
-      <span id="live-dot" class="dot"></span>
-      <span id="live-label">connecting…</span>
-      <span class="sep">·</span>
-      <span id="generated">—</span>
-    </div>
-  </header>
-
-  <!-- Each .card is a self-contained component, rendered by a render*() fn in
-       dashboard.js from the /dashboard/data snapshot. They can be embedded
-       individually by lifting the markup + its render function. -->
-  <main class="grid">
-    <!-- Readiness gauge -->
-    <section class="card span-2 hero" id="card-readiness">
-      <div class="card-head"><h2>Readiness</h2><span class="tag" id="readiness-band">—</span></div>
-      <div class="readiness-body">
-        <svg class="gauge" viewBox="0 0 200 200" id="readiness-gauge"></svg>
-        <div class="readiness-side" id="readiness-components"></div>
+  <div class="wrap">
+    <!-- Header -->
+    <header class="masthead">
+      <div class="title-block">
+        <div class="kicker">personal health intelligence</div>
+        <h1>Fit<em>Lit</em></h1>
       </div>
-    </section>
+      <div class="status">
+        <span class="live"><span id="live-dot" class="dot"></span><span id="live-label">connecting</span></span>
+        <span id="generated" class="stamp">—</span>
+      </div>
+    </header>
 
-    <!-- Live heart rate -->
-    <section class="card" id="card-heart">
-      <div class="card-head"><h2>Heart Rate</h2><span class="muted" id="heart-asof">—</span></div>
-      <div class="big-metric"><span id="hr-bpm" class="num pulse">—</span><span class="unit">bpm</span></div>
-      <div class="sub" id="hr-range">—</div>
-      <svg class="spark" viewBox="0 0 300 60" id="hr-spark"></svg>
-    </section>
+    <!-- Goal ribbon -->
+    <div class="ribbon">
+      <span>goal</span> <em>sub-15% body fat, with muscle</em>
+      <span class="ribbon-sep"></span>
+      <span id="ribbon-readiness">readiness —</span>
+    </div>
 
-    <!-- Steps today -->
-    <section class="card" id="card-steps">
-      <div class="card-head"><h2>Steps Today</h2><span class="muted" id="steps-avg">—</span></div>
-      <div class="big-metric"><span id="steps-num" class="num">—</span></div>
-      <div class="sub" id="steps-goal">—</div>
-      <svg class="bars" viewBox="0 0 300 70" id="steps-bars"></svg>
-    </section>
+    <!-- Tabs -->
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-tab="overview">Overview</button>
+      <button class="tab" data-tab="sleep">Sleep</button>
+      <button class="tab" data-tab="cardio">Cardio &amp; Heart</button>
+      <button class="tab" data-tab="body">Body &amp; Fuel</button>
+    </nav>
 
-    <!-- Recomposition progress -->
-    <section class="card span-2" id="card-recomp">
-      <div class="card-head"><h2>Recomposition</h2><span class="muted" id="recomp-asof">—</span></div>
-      <div class="recomp-row">
-        <div class="stat"><span class="stat-num" id="recomp-now">—</span><span class="stat-lbl">now (lb)</span></div>
-        <div class="recomp-bar-wrap">
-          <div class="recomp-bar"><div class="recomp-fill" id="recomp-fill"></div><div class="recomp-marker" id="recomp-marker"></div></div>
-          <div class="recomp-scale"><span id="recomp-startlbl">—</span><span id="recomp-targetlbl">target —</span></div>
+    <main>
+      <!-- ============ OVERVIEW ============ -->
+      <section class="panel is-active" data-panel="overview">
+        <div class="grid">
+          <article class="card hero span-2 tall">
+            <div class="card-top"><h2>Readiness</h2><span class="pill" id="ov-band">—</span></div>
+            <div class="hero-row">
+              <svg class="gauge" viewBox="0 0 220 220" id="ov-gauge"></svg>
+              <div class="hero-bars" id="ov-components"></div>
+            </div>
+            <p class="whisper" id="ov-reco">—</p>
+          </article>
+
+          <article class="card">
+            <div class="card-top"><h2>Heart</h2><span class="muted" id="ov-hr-asof">—</span></div>
+            <div class="figure"><span class="display" id="ov-hr">—</span><span class="suffix">bpm</span></div>
+            <svg class="spark" viewBox="0 0 320 56" id="ov-hr-spark"></svg>
+          </article>
+
+          <article class="card">
+            <div class="card-top"><h2>Steps today</h2><span class="muted" id="ov-steps-avg">—</span></div>
+            <div class="figure"><span class="display" id="ov-steps">—</span></div>
+            <div class="meter"><div class="meter-fill" id="ov-steps-meter"></div></div>
+            <p class="whisper" id="ov-steps-goal">—</p>
+          </article>
+
+          <article class="card span-2">
+            <div class="card-top"><h2>Toward target</h2><span class="muted" id="ov-recomp-asof">—</span></div>
+            <div class="track-row">
+              <div class="endpoint"><span class="display sm" id="ov-now">—</span><span class="lbl">now</span></div>
+              <div class="track"><div class="track-fill" id="ov-track"></div><div class="track-dot" id="ov-dot"></div></div>
+              <div class="endpoint"><span class="display sm accent" id="ov-target">—</span><span class="lbl">target lb</span></div>
+            </div>
+            <div class="kpis" id="ov-kpis"></div>
+          </article>
+
+          <article class="card span-2">
+            <div class="card-top"><h2>Last night</h2><span class="muted" id="ov-sleep-eff">—</span></div>
+            <div class="figure"><span class="display" id="ov-sleep-h">—</span><span class="suffix">hours asleep</span></div>
+            <div class="stagebar" id="ov-stages"></div>
+          </article>
         </div>
-        <div class="stat"><span class="stat-num accent" id="recomp-target">—</span><span class="stat-lbl">target (lb)</span></div>
-      </div>
-      <div class="kpi-row" id="recomp-kpis"></div>
-    </section>
+      </section>
 
-    <!-- Sleep -->
-    <section class="card" id="card-sleep">
-      <div class="card-head"><h2>Sleep</h2><span class="muted" id="sleep-avg">—</span></div>
-      <div class="big-metric"><span id="sleep-hrs" class="num">—</span><span class="unit">h</span><span class="eff" id="sleep-eff">—</span></div>
-      <div class="stage-bars" id="sleep-stages"></div>
-      <svg class="spark" viewBox="0 0 300 50" id="sleep-spark"></svg>
-    </section>
+      <!-- ============ SLEEP ============ -->
+      <section class="panel" data-panel="sleep">
+        <div class="grid">
+          <article class="card span-2 tall">
+            <div class="card-top"><h2>Last night</h2><span class="muted" id="sl-date">—</span></div>
+            <div class="figure big"><span class="display" id="sl-hours">—</span><span class="suffix">h asleep</span><span class="aside" id="sl-eff">—</span></div>
+            <div class="stagebar tall" id="sl-stages"></div>
+            <div class="legend" id="sl-legend"></div>
+            <div class="kpis" id="sl-kpis"></div>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>Deep</h2><span class="muted">restorative</span></div>
+            <div class="figure"><span class="display" id="sl-deep">—</span><span class="suffix">min</span></div>
+            <p class="whisper">ideal 13–23% · builds recovery</p>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>REM</h2><span class="muted">mind</span></div>
+            <div class="figure"><span class="display" id="sl-rem">—</span><span class="suffix">min</span></div>
+            <p class="whisper">grows with total sleep time</p>
+          </article>
+          <article class="card span-2">
+            <div class="card-top"><h2>Duration trend</h2><span class="muted" id="sl-avg">—</span></div>
+            <svg class="spark tall" viewBox="0 0 320 70" id="sl-spark"></svg>
+            <div class="axis" id="sl-axis"></div>
+          </article>
+          <article class="card span-2">
+            <div class="card-top"><h2>Efficiency trend</h2><span class="muted">last nights</span></div>
+            <svg class="spark tall" viewBox="0 0 320 70" id="sl-eff-spark"></svg>
+          </article>
+        </div>
+      </section>
 
-    <!-- Protein -->
-    <section class="card" id="card-protein">
-      <div class="card-head"><h2>Protein</h2><span class="muted">veg · target</span></div>
-      <div class="ring-wrap">
-        <svg class="ring" viewBox="0 0 120 120" id="protein-ring"></svg>
-        <div class="ring-center"><span id="protein-logged" class="num sm">—</span><span class="unit">/<span id="protein-target">—</span>g</span></div>
-      </div>
-      <div class="sub" id="protein-gap">—</div>
-    </section>
+      <!-- ============ CARDIO ============ -->
+      <section class="panel" data-panel="cardio">
+        <div class="grid">
+          <article class="card span-2">
+            <div class="card-top"><h2>Heart rate</h2><span class="muted" id="ca-asof">—</span></div>
+            <div class="figure big"><span class="display" id="ca-hr">—</span><span class="suffix">bpm</span><span class="aside" id="ca-range">—</span></div>
+            <svg class="spark tall" viewBox="0 0 320 80" id="ca-spark"></svg>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>Resting HR</h2><span class="muted">14-day</span></div>
+            <div class="figure"><span class="display" id="ca-rhr">—</span><span class="suffix">bpm</span><span class="aside" id="ca-rhr-trend"></span></div>
+            <svg class="spark" viewBox="0 0 320 56" id="ca-rhr-spark"></svg>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>Steps avg</h2><span class="muted">10-day</span></div>
+            <div class="figure"><span class="display" id="ca-steps-avg">—</span></div>
+            <svg class="bars" viewBox="0 0 320 64" id="ca-steps-bars"></svg>
+          </article>
+          <article class="card span-2 tall">
+            <div class="card-top"><h2>Heart-rate zones</h2><span class="muted" id="ca-zmax">—</span></div>
+            <div class="zones" id="ca-zones"></div>
+            <p class="whisper">Zone 2 is your daily fat-burn target · Zone 4–5 for the run finisher</p>
+          </article>
+        </div>
+      </section>
 
-    <!-- Resting HR trend -->
-    <section class="card" id="card-rhr">
-      <div class="card-head"><h2>Resting HR</h2><span class="muted">14-day</span></div>
-      <div class="big-metric"><span id="rhr-num" class="num">—</span><span class="unit">bpm</span><span class="trend" id="rhr-trend"></span></div>
-      <svg class="spark" viewBox="0 0 300 60" id="rhr-spark"></svg>
-    </section>
+      <!-- ============ BODY ============ -->
+      <section class="panel" data-panel="body">
+        <div class="grid">
+          <article class="card span-2 tall">
+            <div class="card-top"><h2>Recomposition</h2><span class="muted" id="bo-asof">—</span></div>
+            <div class="track-row">
+              <div class="endpoint"><span class="display sm" id="bo-now">—</span><span class="lbl">now lb</span></div>
+              <div class="track"><div class="track-fill" id="bo-track"></div><div class="track-dot" id="bo-dot"></div></div>
+              <div class="endpoint"><span class="display sm accent" id="bo-target">—</span><span class="lbl">target lb</span></div>
+            </div>
+            <div class="kpis" id="bo-kpis"></div>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>Protein</h2><span class="muted">veg</span></div>
+            <div class="ring-wrap">
+              <svg class="ring" viewBox="0 0 130 130" id="bo-ring"></svg>
+              <div class="ring-mid"><span class="display sm" id="bo-prot">—</span><span class="suffix">/<span id="bo-prot-t">—</span>g</span></div>
+            </div>
+            <p class="whisper" id="bo-prot-gap">—</p>
+          </article>
+          <article class="card">
+            <div class="card-top"><h2>Weight</h2><span class="muted" id="bo-w-n">—</span></div>
+            <div class="figure"><span class="display" id="bo-w">—</span><span class="suffix">lb (7-day avg)</span></div>
+            <svg class="spark" viewBox="0 0 320 56" id="bo-w-spark"></svg>
+          </article>
+          <article class="card span-2">
+            <div class="card-top"><h2>Composition</h2><span class="muted">estimate</span></div>
+            <div class="kpis" id="bo-comp"></div>
+          </article>
+        </div>
+      </section>
+    </main>
 
-    <!-- HR zones -->
-    <section class="card span-2" id="card-zones">
-      <div class="card-head"><h2>HR Zones</h2><span class="muted" id="zones-max">—</span></div>
-      <div class="zones" id="zones-list"></div>
-    </section>
-  </main>
-
-  <footer class="foot">
-    <span>FitLit · Google Health · auto-refresh <b id="refresh-rate">5s</b></span>
-    <span id="err" class="err"></span>
-  </footer>
-
+    <footer class="foot">
+      <span>FitLit · Google Health · refresh <b id="rate">5s</b></span>
+      <span id="err" class="err"></span>
+    </footer>
+  </div>
   <script src="/static/dashboard.js"></script>
 </body>
 </html>
