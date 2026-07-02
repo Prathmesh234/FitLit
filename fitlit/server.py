@@ -34,7 +34,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from fitlit import auth, config, dashboard, insights, journal, orchestrator, ratelimit, storage
+from fitlit import auth, config, components, dashboard, insights, journal, orchestrator, ratelimit, storage
 from fitlit.client import GoogleHealthClient, MissingTokenError
 from fitlit.fetchers.base import fetch_once
 
@@ -250,6 +250,15 @@ async def aggregate(data_type: str, hours: int = 24, window_seconds: int = 3600)
 async def dashboard_data() -> dict:
     """Full metric snapshot powering the live dashboard (polled by the frontend)."""
     return await run_in_threadpool(dashboard.snapshot)
+
+
+@app.get("/api/comp/{name}")
+async def component_data(name: str) -> dict:
+    """Per-component data slice (each dashboard component polls its own endpoint)."""
+    try:
+        return await run_in_threadpool(components.get, name)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"unknown component {name!r}")
 
 
 @app.get("/dashboard")
