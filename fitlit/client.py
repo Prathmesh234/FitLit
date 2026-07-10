@@ -27,6 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fitlit import auth, config, ratelimit, storage
 
@@ -34,6 +35,38 @@ log = logging.getLogger("fitlit.client")
 
 _MAX_RETRIES = 3
 _DEFAULT_BACKOFF = 5  # seconds, used when a 429 carries no Retry-After
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+# Google Health filter fields depend on the data point's shape. Keep this
+# explicit so adding a new fetcher type cannot silently fall back to an
+# unbounded full-history request.
+_INTERVAL_TYPES = frozenset({
+    "steps", "distance", "activeMinutes", "activeZoneMinutes", "activityLevel",
+    "sedentaryPeriod", "altitude", "timeInHeartRateZone",
+})
+_SAMPLE_TYPES = frozenset({
+    "heartRate", "runVo2Max", "vo2Max", "heartRateVariability",
+    "oxygenSaturation", "respiratoryRateSleepSummary", "bodyFat", "weight",
+    "height", "coreBodyTemperature", "bloodGlucose",
+})
+_DAILY_TYPES = frozenset({
+    "dailyHeartRateZones", "dailyVo2Max", "dailyRestingHeartRate",
+    "dailyHeartRateVariability", "dailyOxygenSaturation",
+    "dailyRespiratoryRate", "dailySleepTemperatureDerivations",
+})
+_SESSION_TYPES = frozenset({
+    "exercise", "sleep", "nutritionLog", "hydrationLog",
+    "electrocardiogram", "irregularRhythmNotification",
+})
+_LIST_TYPES = _INTERVAL_TYPES | _SAMPLE_TYPES | _DAILY_TYPES | _SESSION_TYPES
+_CONFIGURED_LIST_TYPES = {
+    data_type
+    for fetcher in config.FETCHERS.values()
+    for data_type in fetcher.data_types
+    if data_type not in config.DAILY_ROLLUP_TYPES
+}
+if missing := _CONFIGURED_LIST_TYPES - _LIST_TYPES:
+    raise RuntimeError(f"missing bounded-list filter mapping for: {sorted(missing)}")
 
 
 class MissingTokenError(RuntimeError):
@@ -47,6 +80,10 @@ def _camel_to_kebab(name: str) -> str:
     only for filters).  The catalogue stores the camelCase identifiers.
     """
     return re.sub(r"(?<!^)(?=[A-Z])", "-", name).lower()
+
+
+def _camel_to_snake(name: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
 def _civil_date_str(civil: dict | None) -> str | None:
@@ -71,6 +108,52 @@ def _rfc3339(dt: datetime) -> str:
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _list_filter(data_type: str, now: datetime) -> str:
+    """Build the bounded dataPoints.list filter required for each data shape."""
+    snake = _camel_to_snake(data_type)
+    if data_type in _INTERVAL_TYPES:
+        start = now - timedelta(hours=config.STREAM_LOOKBACK_HOURS)
+        return (
+            f'{snake}.interval.start_time >= "{_rfc3339(start)}" AND '
+            f'{snake}.interval.start_time < "{_rfc3339(now)}"'
+        )
+    if data_type in _SAMPLE_TYPES:
+        lookback = (
+            timedelta(hours=config.STREAM_LOOKBACK_HOURS)
+            if data_type == "heartRate"
+            else timedelta(days=config.SUMMARY_LOOKBACK_DAYS)
+        )
+        start = now - lookback
+        return (
+            f'{snake}.sample_time.physical_time >= "{_rfc3339(start)}" AND '
+            f'{snake}.sample_time.physical_time < "{_rfc3339(now)}"'
+        )
+    if data_type in _DAILY_TYPES:
+        local_today = now.astimezone(_PACIFIC).date()
+        start = local_today - timedelta(days=config.SUMMARY_LOOKBACK_DAYS)
+        end = local_today + timedelta(days=1)
+        return f'{snake}.date >= "{start.isoformat()}" AND {snake}.date < "{end.isoformat()}"'
+    if data_type == "sleep":
+        start = now - timedelta(days=config.SUMMARY_LOOKBACK_DAYS)
+        return (
+            f'sleep.interval.end_time >= "{_rfc3339(start)}" AND '
+            f'sleep.interval.end_time < "{_rfc3339(now)}"'
+        )
+    if data_type == "electrocardiogram":
+        start = now - timedelta(days=config.SUMMARY_LOOKBACK_DAYS)
+        return f'electrocardiogram.interval.start_time >= "{_rfc3339(start)}"'
+    if data_type in _SESSION_TYPES:
+        start = (now - timedelta(days=config.SUMMARY_LOOKBACK_DAYS)).astimezone(_PACIFIC)
+        end = now.astimezone(_PACIFIC)
+        start_civil = start.strftime("%Y-%m-%dT%H:%M:%S")
+        end_civil = end.strftime("%Y-%m-%dT%H:%M:%S")
+        return (
+            f'{snake}.interval.civil_start_time >= "{start_civil}" AND '
+            f'{snake}.interval.civil_start_time < "{end_civil}"'
+        )
+    raise ValueError(f"unsupported data type for bounded list: {data_type}")
 
 
 def _api_error_message(exc: urllib.error.HTTPError) -> str:
@@ -106,12 +189,13 @@ class GoogleHealthClient:
 
     # ------------------------------------------------------------------ #
     def list_data_points(self, data_type: str) -> int | None:
-        """Fetch + persist every available data point for one data type.
+        """Fetch + persist a bounded, overlapping recent window for one type.
 
-        Follows ``nextPageToken`` so a whole window is captured, upserting each
-        page into the fetcher's SQLite database. Returns the number of points
-        stored, or ``None`` if the very first request failed (logged, never
-        raised, so one bad type can't sink the sweep).
+        The Google API otherwise returns the user's complete history. Replaying
+        that every minute made heart/activity fetches run for hours and saturate
+        the shared quota. Shape-aware filters keep each poll incremental while
+        an overlap window catches delayed or edited points. Pagination is still
+        followed to completion and storage remains idempotent via upsert.
         """
         try:
             auth.get_access_token()  # fail fast + clear message if unconfigured
@@ -121,12 +205,14 @@ class GoogleHealthClient:
         path = f"/v4/users/{urllib.parse.quote(self.user)}/dataTypes/{_camel_to_kebab(data_type)}/dataPoints"
         base = f"{config.BASE_URL}{path}"
         fetched_at = datetime.now(timezone.utc)
+        filter_expression = _list_filter(data_type, fetched_at)
+        page_size = min(config.LIST_PAGE_SIZE, 25) if data_type in {"sleep", "exercise"} else config.LIST_PAGE_SIZE
 
         stored = 0
         page_token: str | None = None
         first = True
         while True:
-            params = {"pageSize": config.PAGE_SIZE}
+            params = {"pageSize": page_size, "filter": filter_expression}
             if page_token:
                 params["pageToken"] = page_token
             body = self._get_with_retry(f"{base}?{urllib.parse.urlencode(params)}", data_type)
