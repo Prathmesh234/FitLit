@@ -81,9 +81,13 @@ uv run python -m fitlit.orchestrator          # daemon
 uv run python -m fitlit.orchestrator --once   # single dispatch tick (testing)
 ```
 
-Each fetcher upserts every pulled data point into **its own SQLite database**
-(see [Storage](#storage-pydantic--sqlite)); scheduler + rate-limit state live in
-`data/state/` (both gitignored).
+Each fetcher upserts an overlapping recent window into **its own SQLite
+database** (see [Storage](#storage-pydantic--sqlite)); scheduler + rate-limit
+state live in `data/state/` (both gitignored). High-frequency interval/heart
+streams re-read the trailing 48 hours, while daily/session metrics re-read 14
+days. This catches delayed or edited Fitbit points without replaying the user's
+entire history every cycle. `dataPoints.list` uses its 10,000-row page limit
+(`sleep` and `exercise` are capped by Google at 25).
 
 ## Storage (Pydantic + SQLite)
 
