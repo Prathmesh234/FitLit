@@ -32,7 +32,14 @@ window.FitComp = (function () {
   }
 
   const registry = [];
+  function visible(c) {
+    if (document.hidden) return false;
+    const mount = document.getElementById(c.mount);
+    const panel = mount && mount.closest('.panel');
+    return Boolean(mount && (!panel || panel.classList.contains('is-active')));
+  }
   async function run(c) {
+    if (!visible(c)) return;
     try {
       const r = await fetch(c.endpoint, { cache: 'no-store' });
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -51,6 +58,13 @@ window.FitComp = (function () {
     // stagger initial fetches slightly so they don't all fire at once
     setTimeout(() => { run(c); c.timer = setInterval(() => run(c), c.intervalMs); },
       120 * registry.length);
+  }
+
+  const tabs = document.getElementById('tabs');
+  if (tabs) {
+    tabs.addEventListener('click', () => {
+      setTimeout(() => registry.filter(visible).forEach(run), 0);
+    });
   }
 
   const api = { palette, zoneColors, stageColors, svg, el, linePath };
