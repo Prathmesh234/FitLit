@@ -365,7 +365,7 @@ def operations_trace() -> dict:
         size_mb = sum(p.stat().st_size for p in files) / 1_000_000
         live_window = max(spec.interval_seconds * 2, 180)
         if last_fetch is None:
-            state = "no-data"
+            state = "empty" if files else "no-data"
         elif fetch_age is not None and fetch_age <= live_window:
             state = "live"
         elif fetch_age is not None and fetch_age <= live_window * 3:
@@ -403,9 +403,16 @@ def operations_trace() -> dict:
         "message": f'{rate["used_this_window"]}/{rate["limit_per_minute"]} requests used this minute',
     }]
     for f in sorted(fetchers, key=lambda item: item["last_dispatch_epoch"] or 0, reverse=True)[:5]:
+        level = {
+            "live": "ok",
+            "quiet": "warn",
+            "empty": "info",
+            "stale": "error",
+            "no-data": "error",
+        }[f["state"]]
         traces.append({
             "time": f["last_dispatch"] or "--:--:--",
-            "level": "ok" if f["state"] == "live" else ("warn" if f["state"] == "quiet" else "error"),
+            "level": level,
             "source": f["name"],
             "message": f'{f["data_types"]} types · fetch age {f["fetch_age"]} · write age {f["write_age"]}',
         })
