@@ -70,6 +70,16 @@ ACCESS_TOKEN = os.environ.get("GOOGLE_HEALTH_ACCESS_TOKEN", "")
 PAGE_SIZE = int(_env("GOOGLE_HEALTH_PAGE_SIZE", "100"))
 REQUEST_TIMEOUT = int(_env("GOOGLE_HEALTH_TIMEOUT", "30"))
 
+# dataPoints.list supports up to 10,000 rows/page (sleep + exercise cap at 25).
+# Use the large page for bounded polling so high-frequency heart data does not
+# consume the entire per-minute quota just walking pagination.
+LIST_PAGE_SIZE = max(1, min(10_000, int(_env("GOOGLE_HEALTH_LIST_PAGE_SIZE", "10000"))))
+
+# Poll overlapping recent windows rather than replaying the user's full history
+# every cycle. Upserts make the overlap safe and capture delayed/edited points.
+STREAM_LOOKBACK_HOURS = int(_env("FITLIT_STREAM_LOOKBACK_HOURS", "48"))
+SUMMARY_LOOKBACK_DAYS = int(_env("FITLIT_SUMMARY_LOOKBACK_DAYS", "14"))
+
 # --------------------------------------------------------------------------- #
 # OAuth 2.0 (Google) — refresh-token flow.  Access tokens live ~1h; the
 # long-lived refresh token mints fresh ones unattended.  See fitlit/auth.py and
