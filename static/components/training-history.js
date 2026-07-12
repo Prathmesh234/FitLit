@@ -5,7 +5,10 @@ FitComp.register('cmp-training-history', '/api/comp/training_history', function 
     mount.innerHTML = '<p class="cmp-empty">training history unavailable</p>';
     return;
   }
-  const rows = d.series, W = 700, H = 205, l = 32, r = 10, t = 10, b = 23;
+  const rows = d.series;
+  const W = Math.max(180, Math.round(mount.clientWidth - 70));
+  const H = window.innerWidth <= 560 ? 190 : 220;
+  const l = 42, r = 14, t = 12, b = 26;
   const iw = W-l-r, ih = H-t-b;
   const x = (i) => l + (rows.length === 1 ? iw/2 : i*iw/(rows.length-1));
   const maxDuration = Math.max.apply(null, rows.map((row) => row.duration_min).concat([60]));
@@ -48,14 +51,14 @@ FitComp.register('cmp-training-history', '/api/comp/training_history', function 
   mount.innerHTML = `
     <div class="cmp-head"><h3>30-day training dashboard</h3><span class="cmp-tag">load + session ledger</span></div>
     <div class="history-kpis">
-      <div class="history-kpi"><span>sessions</span><b>${d.summary.sessions}</b><small>${(d.summary.sessions/d.days*7).toFixed(1)} per week</small></div>
-      <div class="history-kpi"><span>training time</span><b>${d.summary.duration_min} min</b><small>${Math.round(d.summary.duration_min/Math.max(d.summary.sessions,1))} min / session</small></div>
-      <div class="history-kpi"><span>active zone load</span><b>${d.summary.active_zone_minutes} min</b><small>Fitbit active-zone minutes</small></div>
-      <div class="history-kpi"><span>distance</span><b>${d.summary.distance_km} km</b><small>${d.summary.calories.toLocaleString()} exercise kcal</small></div>
+      <div class="history-kpi"><span>Sessions</span><b>${d.summary.sessions} <em>total</em></b><small>${(d.summary.sessions/d.days*7).toFixed(1)} sessions per week</small></div>
+      <div class="history-kpi"><span>Training time</span><b>${d.summary.duration_min} <em>min</em></b><small>${Math.round(d.summary.duration_min/Math.max(d.summary.sessions,1))} minutes per session</small></div>
+      <div class="history-kpi"><span>Active-zone load</span><b>${d.summary.active_zone_minutes} <em>min</em></b><small>Fitbit active-zone minutes</small></div>
+      <div class="history-kpi"><span>Distance</span><b>${d.summary.distance_km} <em>km</em></b><small>${d.summary.calories.toLocaleString()} exercise kcal</small></div>
     </div>
     <div class="history-panel">
       <div class="history-panel-head"><b>Daily training load</b><span>hover or focus a day</span></div>
-      <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+      <svg viewBox="0 0 ${W} ${H}" class="history-svg history-svg-wide">
         ${grid}
         ${bars}
         ${zonePath ? `<path d="${zonePath}" fill="none" stroke="${api.palette.honey}" stroke-width="2.2" stroke-linejoin="round"/>` : ''}
