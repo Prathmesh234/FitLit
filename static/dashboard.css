@@ -458,6 +458,7 @@ body {
   border-radius: 14px;
   min-width: 0;
   padding: 13px;
+  position: relative;
 }
 .history-panel-head {
   align-items: baseline;
@@ -469,6 +470,67 @@ body {
 .history-panel-head span { color: var(--t30); font-family: var(--mono); font-size: 9px; }
 .history-svg { display: block; height: 205px; overflow: visible; width: 100%; }
 .history-axis { fill: var(--t30); font-family: var(--mono); font-size: 8px; }
+.history-gridline { stroke: var(--t08); stroke-width: 1; }
+.history-hit { cursor: crosshair; outline: none; }
+.history-guide {
+  opacity: 0;
+  pointer-events: none;
+  stroke: var(--ink);
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+  transition: opacity .15s ease;
+}
+.history-hit:hover .history-guide,
+.history-hit:focus .history-guide { opacity: .42; }
+.history-hit:focus .history-guide { opacity: .8; stroke-width: 2; }
+.chart-tooltip {
+  background: rgba(34,30,22,.94);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 11px;
+  box-shadow: 0 10px 28px rgba(34,30,22,.22);
+  color: var(--card);
+  min-width: 174px;
+  opacity: 0;
+  padding: 10px 11px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateY(4px);
+  transition: opacity .12s ease, transform .12s ease;
+  z-index: 20;
+}
+.chart-tooltip.is-visible { opacity: 1; transform: none; }
+.chart-tooltip > b {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: .04em;
+  margin-bottom: 7px;
+}
+.chart-tooltip > span {
+  align-items: center;
+  display: flex;
+  font-size: 10.5px;
+  gap: 12px;
+  justify-content: space-between;
+  margin-top: 4px;
+}
+.chart-tooltip i {
+  color: rgba(244,239,228,.68);
+  font-style: normal;
+  padding-left: 10px;
+  position: relative;
+}
+.chart-tooltip i::before {
+  background: var(--tip-color, rgba(244,239,228,.32));
+  border-radius: 50%;
+  content: "";
+  height: 6px;
+  left: 0;
+  position: absolute;
+  top: 4px;
+  width: 6px;
+}
+.chart-tooltip strong { font-family: var(--mono); font-size: 10px; font-weight: 500; white-space: nowrap; }
 .history-note { color: var(--t55); font-size: 11px; margin-top: 8px; }
 .history-table-wrap { margin-top: 14px; overflow-x: auto; }
 .history-table { border-collapse: collapse; font-size: 11px; min-width: 620px; width: 100%; }
@@ -520,4 +582,5 @@ body {
   .trace-source { display: none; }
   .history-grid { grid-template-columns: 1fr; }
   .history-svg { height: 180px; }
+  .chart-tooltip { min-width: 160px; }
 }
