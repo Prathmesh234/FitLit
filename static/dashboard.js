@@ -9,6 +9,7 @@ const $ = (id) => document.getElementById(id);
 const C = { clay: '#bd6a4a', sage: '#7c8154', honey: '#c8973f', rust: '#a94e33', teal: '#5f8579', rose: '#b07766', ink: '#221e16', faint: 'rgba(34,30,22,.10)' };
 const bandCol = (b) => ({ green: C.sage, amber: C.honey, red: C.rust }[b] || C.clay);
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
+const last = (items) => items[items.length - 1];
 
 /* ---------- tabs ---------- */
 $('tabs').addEventListener('click', (e) => {
@@ -26,11 +27,11 @@ function spark(el, vals, color, fill = true) {
   const dx = (w - pad * 2) / (vals.length - 1);
   const pts = vals.map((v, i) => [pad + i * dx, h - pad - ((v - mn) / rng) * (h - pad * 2)]);
   const line = pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
-  const area = line + ` L${pts.at(-1)[0].toFixed(1)} ${h} L${pts[0][0].toFixed(1)} ${h} Z`;
+  const area = line + ` L${last(pts)[0].toFixed(1)} ${h} L${pts[0][0].toFixed(1)} ${h} Z`;
   el.innerHTML =
     (fill ? `<path d="${area}" fill="${color}" opacity="0.12"/>` : '') +
     `<path d="${line}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round" stroke-linecap="round"/>` +
-    `<circle cx="${pts.at(-1)[0].toFixed(1)}" cy="${pts.at(-1)[1].toFixed(1)}" r="3.4" fill="${color}"/>`;
+    `<circle cx="${last(pts)[0].toFixed(1)}" cy="${last(pts)[1].toFixed(1)}" r="3.4" fill="${color}"/>`;
 }
 
 function bars(el, vals, color) {
@@ -164,7 +165,7 @@ function renderSleep(s) {
   const nights = s.nights || [];
   spark($('sl-spark'), nights.map((x) => x.hours_asleep).filter((v) => v != null), C.teal);
   spark($('sl-eff-spark'), nights.map((x) => x.efficiency_pct).filter((v) => v != null), C.sage);
-  if (nights.length) $('sl-axis').innerHTML = `<span>${nights[0].night}</span><span>${nights.at(-1).night}</span>`;
+  if (nights.length) $('sl-axis').innerHTML = `<span>${nights[0].night}</span><span>${last(nights).night}</span>`;
 }
 
 function renderProtein(p) {
@@ -181,7 +182,7 @@ function renderRHR(r) {
   $('ca-rhr').textContent = r.latest ?? '—';
   const s = r.series || [];
   if (s.length >= 2) {
-    const delta = s.at(-1) - s[0], t = $('ca-rhr-trend');
+    const delta = last(s) - s[0], t = $('ca-rhr-trend');
     t.textContent = (delta <= 0 ? '▼ ' : '▲ ') + Math.abs(delta).toFixed(0);
     t.className = 'aside trend ' + (delta <= 0 ? 'down' : 'up');
   }
@@ -215,16 +216,27 @@ async function tick() {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
     $('live-dot').className = 'dot on'; $('live-label').textContent = 'live';
-    $('generated').textContent = d.generated_at + ' PT'; $('err').textContent = '';
-    renderReadiness(d.readiness);
-    renderHeart(d.heart);
-    renderSteps(d.activity);
-    renderRecomp(d.recomp, d.recomp_progress);
-    renderSleep(d.sleep);
-    renderProtein(d.protein);
-    renderRHR(d.resting_hr);
-    renderWeight(d.weight);
-    renderZones(d.zones);
+    $('generated').textContent = d.generated_at + ' PT';
+
+    const errors = [];
+    [
+      ['readiness', () => renderReadiness(d.readiness)],
+      ['heart', () => renderHeart(d.heart)],
+      ['steps', () => renderSteps(d.activity)],
+      ['recomp', () => renderRecomp(d.recomp, d.recomp_progress)],
+      ['sleep', () => renderSleep(d.sleep)],
+      ['protein', () => renderProtein(d.protein)],
+      ['resting HR', () => renderRHR(d.resting_hr)],
+      ['weight', () => renderWeight(d.weight)],
+      ['zones', () => renderZones(d.zones)],
+    ].forEach(([name, render]) => {
+      try {
+        render();
+      } catch (error) {
+        errors.push(`${name}: ${error.message || error}`);
+      }
+    });
+    $('err').textContent = errors.join(' · ');
   } catch (e) {
     $('live-dot').className = 'dot'; $('live-label').textContent = 'offline';
     $('err').textContent = String(e.message || e);
