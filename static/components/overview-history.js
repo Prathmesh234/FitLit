@@ -6,7 +6,9 @@ FitComp.register('cmp-overview-history', '/api/comp/overview_history', function 
     return;
   }
   const rows = d.series;
-  const W = 700, H = 205, l = 34, r = 12, t = 10, b = 24;
+  const W = Math.max(180, Math.round(mount.clientWidth - 70));
+  const H = window.innerWidth <= 560 ? 190 : 220;
+  const l = 42, r = 14, t = 12, b = 26;
   const iw = W - l - r, ih = H - t - b;
   const x = (i) => l + (rows.length === 1 ? iw / 2 : i * iw / (rows.length - 1));
   const stepMax = Math.max(d.targets.steps, ...rows.map((row) => row.steps || 0), 1);
@@ -43,14 +45,14 @@ FitComp.register('cmp-overview-history', '/api/comp/overview_history', function 
   mount.innerHTML = `
     <div class="cmp-head"><h3>14-day progress dashboard</h3><span class="cmp-tag">activity + recovery</span></div>
     <div class="history-kpis">
-      <div class="history-kpi"><span>average steps</span><b>${(summary.avg_steps || 0).toLocaleString()}</b><small>${summary.days_with_activity || 0}/${d.days} days captured</small></div>
-      <div class="history-kpi"><span>average sleep</span><b>${summary.avg_sleep_hours || '—'}h</b><small>${summary.nights_with_sleep || 0} nights captured</small></div>
-      <div class="history-kpi"><span>average HRV</span><b>${summary.avg_hrv_ms || '—'} ms</b><small>higher supports recovery</small></div>
-      <div class="history-kpi"><span>resting heart rate</span><b>${summary.avg_resting_hr || '—'} bpm</b><small>14-day baseline</small></div>
+      <div class="history-kpi"><span>Average steps</span><b>${(summary.avg_steps || 0).toLocaleString()} <em>steps</em></b><small>${summary.days_with_activity || 0} of ${d.days} days captured</small></div>
+      <div class="history-kpi"><span>Average sleep</span><b>${summary.avg_sleep_hours || '—'} <em>hours</em></b><small>${summary.nights_with_sleep || 0} nights captured</small></div>
+      <div class="history-kpi"><span>Average HRV</span><b>${summary.avg_hrv_ms || '—'} <em>ms</em></b><small>Higher supports recovery</small></div>
+      <div class="history-kpi"><span>Resting heart rate</span><b>${summary.avg_resting_hr || '—'} <em>bpm</em></b><small>14-day baseline</small></div>
     </div>
     <div class="history-panel">
       <div class="history-panel-head"><b>Daily movement and sleep</b><span>hover or focus a day</span></div>
-      <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+      <svg viewBox="0 0 ${W} ${H}" class="history-svg history-svg-wide">
         ${grid}
         <line x1="${l}" y1="${targetY.toFixed(1)}" x2="${W-r}" y2="${targetY.toFixed(1)}" stroke="${api.palette.sage}" stroke-dasharray="4 4" opacity=".35"/>
         ${bars}
