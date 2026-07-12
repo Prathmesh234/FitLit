@@ -5,7 +5,10 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
     mount.innerHTML = '<p class="cmp-empty">body history unavailable</p>';
     return;
   }
-  const W = 540, H = 205, l = 32, r = 10, t = 10, b = 22;
+  const panelWidth = window.innerWidth > 560 ? (mount.clientWidth - 110) / 2 : mount.clientWidth - 70;
+  const W = Math.max(180, Math.round(panelWidth));
+  const H = window.innerWidth <= 560 ? 180 : 205;
+  const l = 38, r = 12, t = 12, b = 24;
   const iw = W-l-r, ih = H-t-b;
   function lineChart(rows, keys, colors, target) {
     if (!rows.length) return '<div class="history-empty">no measurements in this window</div>';
@@ -71,15 +74,16 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
       ${labels}${hits}</svg>`;
   }
   const change = d.summary.weight_change_lb;
-  const changeLabel = change == null ? '—' : `${change > 0 ? '+' : ''}${change} lb`;
+  const changeLabel = change == null ? '—' : `${change > 0 ? '+' : ''}${change}`;
+  const changeUnit = change == null ? '' : '<em>lb</em>';
 
   mount.innerHTML = `
     <div class="cmp-head"><h3>90-day body and fuel dashboard</h3><span class="cmp-tag">trend-weighted progress</span></div>
     <div class="history-kpis">
-      <div class="history-kpi"><span>latest 7-day average</span><b>${d.summary.latest_avg7_lb || '—'} lb</b><small>${weights.length} weigh-ins plotted</small></div>
-      <div class="history-kpi"><span>observed change</span><b>${changeLabel}</b><small>first to latest rolling average</small></div>
-      <div class="history-kpi"><span>target weight</span><b>${d.summary.target_lb || '—'} lb</b><small>sub-15% model target</small></div>
-      <div class="history-kpi"><span>nutrition coverage</span><b>${d.summary.days_with_calories}/${d.days}</b><small>protein target ${d.summary.protein_target_g || '—'}g</small></div>
+      <div class="history-kpi"><span>Latest 7-day average</span><b>${d.summary.latest_avg7_lb || '—'} <em>lb</em></b><small>${weights.length} weigh-ins plotted</small></div>
+      <div class="history-kpi"><span>Observed change</span><b>${changeLabel} ${changeUnit}</b><small>First to latest rolling average</small></div>
+      <div class="history-kpi"><span>Target weight</span><b>${d.summary.target_lb || '—'} <em>lb</em></b><small>Sub-15% model target</small></div>
+      <div class="history-kpi"><span>Nutrition coverage</span><b>${d.summary.days_with_calories}/${d.days} <em>days</em></b><small>Protein target ${d.summary.protein_target_g || '—'} g</small></div>
     </div>
     <div class="history-grid">
       <div class="history-panel history-weight-panel">
