@@ -6,7 +6,10 @@ FitComp.register('cmp-recovery-history', '/api/comp/recovery_history', function 
     return;
   }
   const rows = d.series;
-  const W = 540, H = 205, l = 30, r = 10, t = 10, b = 22;
+  const panelWidth = window.innerWidth > 560 ? (mount.clientWidth - 110) / 2 : mount.clientWidth - 70;
+  const W = Math.max(180, Math.round(panelWidth));
+  const H = window.innerWidth <= 560 ? 180 : 205;
+  const l = 38, r = 12, t = 12, b = 24;
   const iw = W - l - r, ih = H - t - b;
   const x = (i) => l + (rows.length === 1 ? iw / 2 : i * iw / (rows.length - 1));
   const labels = rows.map((row, i) => i % 6 ? '' :
@@ -52,10 +55,10 @@ FitComp.register('cmp-recovery-history', '/api/comp/recovery_history', function 
   mount.innerHTML = `
     <div class="cmp-head"><h3>30-day recovery dashboard</h3><span class="cmp-tag">${d.summary.sleep_coverage}/${d.days} nights synced</span></div>
     <div class="history-kpis">
-      <div class="history-kpi"><span>average sleep</span><b>${d.summary.avg_sleep_hours || '—'}h</b><small>target ${d.targets.sleep_hours}h</small></div>
-      <div class="history-kpi"><span>sleep direction</span><b>${trend == null ? '—' : (trend > 0 ? '↑' : trend < 0 ? '↓' : '→')}</b><small>${trendText}</small></div>
-      <div class="history-kpi"><span>average HRV</span><b>${d.summary.avg_hrv_ms || '—'} ms</b><small>autonomic recovery</small></div>
-      <div class="history-kpi"><span>average resting HR</span><b>${d.summary.avg_resting_hr || '—'} bpm</b><small>lower is generally favorable</small></div>
+      <div class="history-kpi"><span>Average sleep</span><b>${d.summary.avg_sleep_hours || '—'} <em>hours</em></b><small>Target ${d.targets.sleep_hours} hours</small></div>
+      <div class="history-kpi"><span>Sleep direction</span><b>${trend == null ? '—' : (trend > 0 ? '↑' : trend < 0 ? '↓' : '→')} <em>recent</em></b><small>${trendText}</small></div>
+      <div class="history-kpi"><span>Average HRV</span><b>${d.summary.avg_hrv_ms || '—'} <em>ms</em></b><small>Autonomic recovery</small></div>
+      <div class="history-kpi"><span>Average resting HR</span><b>${d.summary.avg_resting_hr || '—'} <em>bpm</em></b><small>Lower is generally favorable</small></div>
     </div>
     <div class="history-grid">
       <div class="history-panel history-sleep-panel">
