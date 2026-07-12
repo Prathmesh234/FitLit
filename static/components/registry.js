@@ -30,6 +30,69 @@ window.FitComp = (function () {
   function linePath(pts) {
     return pts.map((p, i) => (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1)).join(' ');
   }
+  function formatDay(day) {
+    return new Date(day + 'T12:00:00').toLocaleDateString('en-US', {
+      timeZone: 'America/Los_Angeles', weekday: 'short', month: 'short', day: 'numeric',
+    });
+  }
+  function bindTooltip(root, selector, describe) {
+    if (!root) return;
+    const tip = document.createElement('div');
+    tip.className = 'chart-tooltip';
+    tip.setAttribute('role', 'tooltip');
+    root.appendChild(tip);
+
+    function fill(data) {
+      tip.textContent = '';
+      const title = document.createElement('b');
+      title.textContent = data.title;
+      tip.appendChild(title);
+      (data.rows || []).forEach((row) => {
+        const line = document.createElement('span');
+        const label = document.createElement('i');
+        const value = document.createElement('strong');
+        label.textContent = row.label;
+        value.textContent = row.value;
+        if (row.color) label.style.setProperty('--tip-color', row.color);
+        line.appendChild(label);
+        line.appendChild(value);
+        tip.appendChild(line);
+      });
+    }
+    function position(target, event) {
+      const rootRect = root.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const pointerX = event && event.clientX ? event.clientX : targetRect.left + targetRect.width / 2;
+      const pointerY = event && event.clientY ? event.clientY : targetRect.top + targetRect.height / 2;
+      let left = pointerX - rootRect.left + 12;
+      let top = pointerY - rootRect.top + 12;
+      if (left + tip.offsetWidth > rootRect.width - 8) left -= tip.offsetWidth + 24;
+      if (top + tip.offsetHeight > rootRect.height - 8) top -= tip.offsetHeight + 24;
+      tip.style.left = Math.max(8, left) + 'px';
+      tip.style.top = Math.max(8, top) + 'px';
+    }
+    function show(target, event) {
+      const data = describe(target);
+      if (!data) return;
+      fill(data);
+      tip.classList.add('is-visible');
+      position(target, event);
+    }
+    root.querySelectorAll(selector).forEach((target) => {
+      const data = describe(target);
+      if (!data) return;
+      target.setAttribute('tabindex', '0');
+      target.setAttribute('role', 'img');
+      target.setAttribute('aria-label', [data.title].concat(
+        (data.rows || []).map((row) => row.label + ' ' + row.value)
+      ).join(', '));
+      target.addEventListener('pointerenter', (event) => show(target, event));
+      target.addEventListener('pointermove', (event) => position(target, event));
+      target.addEventListener('pointerleave', () => tip.classList.remove('is-visible'));
+      target.addEventListener('focus', () => show(target));
+      target.addEventListener('blur', () => tip.classList.remove('is-visible'));
+    });
+  }
 
   const registry = [];
   function visible(c) {
@@ -67,6 +130,6 @@ window.FitComp = (function () {
     });
   }
 
-  const api = { palette, zoneColors, stageColors, svg, el, linePath };
-  return { register, palette, zoneColors, stageColors, svg, el, linePath, _api: api };
+  const api = { palette, zoneColors, stageColors, svg, el, linePath, formatDay, bindTooltip };
+  return { register, palette, zoneColors, stageColors, svg, el, linePath, formatDay, bindTooltip, _api: api };
 })();
