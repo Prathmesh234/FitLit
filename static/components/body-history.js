@@ -1,0 +1,73 @@
+/* Body history — 90-day weight trajectory and energy/protein coverage. */
+'use strict';
+FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, d, api) {
+  if (!d || !d.weights) {
+    mount.innerHTML = '<p class="cmp-empty">body history unavailable</p>';
+    return;
+  }
+  const W = 540, H = 205, l = 32, r = 10, t = 10, b = 22;
+  const iw = W-l-r, ih = H-t-b;
+  function lineChart(rows, keys, colors, target) {
+    if (!rows.length) return '<div class="history-empty">no measurements in this window</div>';
+    const values = [];
+    rows.forEach((row) => keys.forEach((key) => { if (row[key] != null) values.push(row[key]); }));
+    if (target != null) values.push(target);
+    const lo = Math.min.apply(null, values)-1, hi = Math.max.apply(null, values)+1;
+    const span = Math.max(hi-lo, 1);
+    const x = (i) => l + (rows.length === 1 ? iw/2 : i*iw/(rows.length-1));
+    const y = (v) => t + ih - (v-lo)/span*ih;
+    const paths = keys.map((key, index) => {
+      const points = rows.map((row, i) => row[key] == null ? null : [x(i), y(row[key])]).filter((point) => point);
+      if (points.length > 1) return `<path d="${api.linePath(points)}" fill="none" stroke="${colors[index]}" stroke-width="${index ? 2.6 : 1.2}" opacity="${index ? 1 : .35}" stroke-linejoin="round"/>`;
+      return points.length ? `<circle cx="${points[0][0]}" cy="${points[0][1]}" r="3" fill="${colors[index]}"/>` : '';
+    }).join('');
+    const labels = rows.map((row, i) => i % Math.max(1, Math.floor(rows.length/5)) ? '' :
+      `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
+    const targetLine = target == null ? '' :
+      `<line x1="${l}" y1="${y(target).toFixed(1)}" x2="${W-r}" y2="${y(target).toFixed(1)}" stroke="${api.palette.clay}" stroke-dasharray="4 4" opacity=".65"/>`;
+    return `<svg viewBox="0 0 ${W} ${H}" class="history-svg">${targetLine}${paths}${labels}</svg>`;
+  }
+  const weights = d.weights;
+  const fuel = d.fuel || [];
+  const fuelRows = fuel.filter((row) => row.calories_in != null || row.calories_out != null);
+  let fuelChart = '<div class="history-empty">log meals to unlock energy balance trends</div>';
+  if (fuelRows.length) {
+    const max = Math.max.apply(null, fuelRows.reduce((all, row) =>
+      all.concat([row.calories_in || 0, row.calories_out || 0]), [1]));
+    const x = (i) => l + (fuelRows.length === 1 ? iw/2 : i*iw/(fuelRows.length-1));
+    const y = (v) => t + ih - v/max*ih;
+    const inPoints = fuelRows.filter((row) => row.calories_in != null).map((row) => [x(fuelRows.indexOf(row)), y(row.calories_in)]);
+    const outPoints = fuelRows.filter((row) => row.calories_out != null).map((row) => [x(fuelRows.indexOf(row)), y(row.calories_out)]);
+    const labels = fuelRows.map((row, i) => i % Math.max(1, Math.floor(fuelRows.length/5)) ? '' :
+      `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
+    fuelChart = `<svg viewBox="0 0 ${W} ${H}" class="history-svg">
+      ${inPoints.length > 1 ? `<path d="${api.linePath(inPoints)}" fill="none" stroke="${api.palette.clay}" stroke-width="2.3"/>` : ''}
+      ${outPoints.length > 1 ? `<path d="${api.linePath(outPoints)}" fill="none" stroke="${api.palette.sage}" stroke-width="2.3"/>` : ''}
+      ${inPoints.length === 1 ? `<circle cx="${inPoints[0][0]}" cy="${inPoints[0][1]}" r="3" fill="${api.palette.clay}"/>` : ''}
+      ${outPoints.length === 1 ? `<circle cx="${outPoints[0][0]}" cy="${outPoints[0][1]}" r="3" fill="${api.palette.sage}"/>` : ''}
+      ${labels}</svg>`;
+  }
+  const change = d.summary.weight_change_lb;
+  const changeLabel = change == null ? '—' : `${change > 0 ? '+' : ''}${change} lb`;
+
+  mount.innerHTML = `
+    <div class="cmp-head"><h3>90-day body and fuel dashboard</h3><span class="cmp-tag">trend-weighted progress</span></div>
+    <div class="history-kpis">
+      <div class="history-kpi"><span>latest 7-day average</span><b>${d.summary.latest_avg7_lb || '—'} lb</b><small>${weights.length} weigh-ins plotted</small></div>
+      <div class="history-kpi"><span>observed change</span><b>${changeLabel}</b><small>first to latest rolling average</small></div>
+      <div class="history-kpi"><span>target weight</span><b>${d.summary.target_lb || '—'} lb</b><small>sub-15% model target</small></div>
+      <div class="history-kpi"><span>nutrition coverage</span><b>${d.summary.days_with_calories}/${d.days}</b><small>protein target ${d.summary.protein_target_g || '—'}g</small></div>
+    </div>
+    <div class="history-grid">
+      <div class="history-panel">
+        <div class="history-panel-head"><b>Weight trajectory</b><span>raw + rolling average</span></div>
+        ${lineChart(weights, ['weight_lb','avg7_lb'], [api.palette.t30, api.palette.teal], d.summary.target_lb)}
+        <div class="chart-legend"><span><i style="background:${api.palette.t30}"></i>scale weight</span><span><i style="background:${api.palette.teal}"></i>7-reading average</span><span><i style="background:transparent;border-top:1px dashed ${api.palette.clay}"></i>target</span></div>
+      </div>
+      <div class="history-panel">
+        <div class="history-panel-head"><b>Energy trajectory</b><span>logged intake vs measured output</span></div>
+        ${fuelChart}
+        <div class="chart-legend"><span><i style="background:${api.palette.clay}"></i>calories in</span><span><i style="background:${api.palette.sage}"></i>calories out</span></div>
+      </div>
+    </div>`;
+}, 60000);
