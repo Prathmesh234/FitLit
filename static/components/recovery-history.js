@@ -18,6 +18,17 @@ FitComp.register('cmp-recovery-history', '/api/comp/recovery_history', function 
       width="${barW.toFixed(1)}" height="${(t+ih-sleepY(row.sleep_hours)).toFixed(1)}" rx="2"
       fill="${api.palette.teal}" opacity=".55"><title>${row.day}: ${row.sleep_hours}h · ${row.efficiency_pct}% efficient</title></rect>`).join('');
   const targetY = sleepY(d.targets.sleep_hours);
+  const hitWidth = rows.length > 1 ? iw / (rows.length - 1) : iw;
+  const hits = rows.map((row, i) =>
+    `<g class="history-hit" data-index="${i}">
+      <line x1="${x(i).toFixed(1)}" y1="${t}" x2="${x(i).toFixed(1)}" y2="${t+ih}" class="history-guide"/>
+      <rect x="${(x(i)-hitWidth/2).toFixed(1)}" y="${t}" width="${hitWidth.toFixed(1)}" height="${ih}" fill="transparent"/>
+    </g>`).join('');
+  const sleepGrid = [0, 5, 10].map((value) => {
+    const gy = sleepY(value);
+    return `<line x1="${l}" y1="${gy.toFixed(1)}" x2="${W-r}" y2="${gy.toFixed(1)}" class="history-gridline"/>
+      <text x="${l-5}" y="${(gy+3).toFixed(1)}" text-anchor="end" class="history-axis">${value}h</text>`;
+  }).join('');
 
   function normalizedPath(key, invert) {
     const values = rows.map((row) => row[key]).filter((value) => value != null);
@@ -47,22 +58,39 @@ FitComp.register('cmp-recovery-history', '/api/comp/recovery_history', function 
       <div class="history-kpi"><span>average resting HR</span><b>${d.summary.avg_resting_hr || '—'} bpm</b><small>lower is generally favorable</small></div>
     </div>
     <div class="history-grid">
-      <div class="history-panel">
-        <div class="history-panel-head"><b>Sleep volume</b><span>nightly hours</span></div>
+      <div class="history-panel history-sleep-panel">
+        <div class="history-panel-head"><b>Sleep volume</b><span>hover or focus a night</span></div>
         <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+          ${sleepGrid}
           <line x1="${l}" y1="${targetY.toFixed(1)}" x2="${W-r}" y2="${targetY.toFixed(1)}" stroke="${api.palette.honey}" stroke-dasharray="4 4" opacity=".65"/>
-          ${sleepBars}${labels}
+          ${sleepBars}${labels}${hits}
         </svg>
         <div class="chart-legend"><span><i style="background:${api.palette.teal};opacity:.6"></i>sleep hours</span><span><i style="background:transparent;border-top:1px dashed ${api.palette.honey}"></i>7.5h target</span></div>
       </div>
-      <div class="history-panel">
-        <div class="history-panel-head"><b>Recovery signals</b><span>direction normalized</span></div>
+      <div class="history-panel history-signal-panel">
+        <div class="history-panel-head"><b>Recovery signals</b><span>relative direction · hover for values</span></div>
         <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+          <line x1="${l}" y1="${t+ih/2}" x2="${W-r}" y2="${t+ih/2}" class="history-gridline"/>
           ${hrvPath ? `<path d="${hrvPath}" fill="none" stroke="${api.palette.teal}" stroke-width="2.4" stroke-linejoin="round"/>` : ''}
           ${rhrPath ? `<path d="${rhrPath}" fill="none" stroke="${api.palette.rust}" stroke-width="2.4" stroke-linejoin="round"/>` : ''}
-          ${labels}
+          ${labels}${hits}
         </svg>
         <div class="chart-legend"><span><i style="background:${api.palette.teal}"></i>HRV higher</span><span><i style="background:${api.palette.rust}"></i>resting HR lower</span></div>
       </div>
     </div>`;
+  function recoveryTip(target) {
+    const row = rows[Number(target.dataset.index)];
+    return {
+      title: api.formatDay(row.day),
+      rows: [
+        { label: 'Sleep', value: row.sleep_hours == null ? 'No data' : row.sleep_hours + ' h', color: api.palette.teal },
+        { label: 'Efficiency', value: row.efficiency_pct == null ? 'No data' : row.efficiency_pct + '%' },
+        { label: 'Awake', value: row.awake_min == null ? 'No data' : row.awake_min + ' min' },
+        { label: 'HRV', value: row.hrv_ms == null ? 'No data' : row.hrv_ms + ' ms', color: api.palette.teal },
+        { label: 'Resting HR', value: row.resting_hr == null ? 'No data' : row.resting_hr + ' bpm', color: api.palette.rust },
+      ],
+    };
+  }
+  api.bindTooltip(mount.querySelector('.history-sleep-panel'), '.history-hit', recoveryTip);
+  api.bindTooltip(mount.querySelector('.history-signal-panel'), '.history-hit', recoveryTip);
 }, 60000);
