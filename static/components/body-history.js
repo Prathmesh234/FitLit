@@ -25,7 +25,18 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
       `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
     const targetLine = target == null ? '' :
       `<line x1="${l}" y1="${y(target).toFixed(1)}" x2="${W-r}" y2="${y(target).toFixed(1)}" stroke="${api.palette.clay}" stroke-dasharray="4 4" opacity=".65"/>`;
-    return `<svg viewBox="0 0 ${W} ${H}" class="history-svg">${targetLine}${paths}${labels}</svg>`;
+    const hitWidth = rows.length > 1 ? iw / (rows.length - 1) : iw;
+    const hits = rows.map((row, i) =>
+      `<g class="history-hit" data-index="${i}">
+        <line x1="${x(i).toFixed(1)}" y1="${t}" x2="${x(i).toFixed(1)}" y2="${t+ih}" class="history-guide"/>
+        <rect x="${(x(i)-hitWidth/2).toFixed(1)}" y="${t}" width="${hitWidth.toFixed(1)}" height="${ih}" fill="transparent"/>
+      </g>`).join('');
+    const grid = [lo, (lo+hi)/2, hi].map((value) => {
+      const gy = y(value);
+      return `<line x1="${l}" y1="${gy.toFixed(1)}" x2="${W-r}" y2="${gy.toFixed(1)}" class="history-gridline"/>
+        <text x="${l-5}" y="${(gy+3).toFixed(1)}" text-anchor="end" class="history-axis">${value.toFixed(0)}</text>`;
+    }).join('');
+    return `<svg viewBox="0 0 ${W} ${H}" class="history-svg">${grid}${targetLine}${paths}${labels}${hits}</svg>`;
   }
   const weights = d.weights;
   const fuel = d.fuel || [];
@@ -40,12 +51,24 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
     const outPoints = fuelRows.filter((row) => row.calories_out != null).map((row) => [x(fuelRows.indexOf(row)), y(row.calories_out)]);
     const labels = fuelRows.map((row, i) => i % Math.max(1, Math.floor(fuelRows.length/5)) ? '' :
       `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
+    const hitWidth = fuelRows.length > 1 ? iw / (fuelRows.length - 1) : iw;
+    const hits = fuelRows.map((row, i) =>
+      `<g class="history-hit" data-index="${i}">
+        <line x1="${x(i).toFixed(1)}" y1="${t}" x2="${x(i).toFixed(1)}" y2="${t+ih}" class="history-guide"/>
+        <rect x="${(x(i)-hitWidth/2).toFixed(1)}" y="${t}" width="${hitWidth.toFixed(1)}" height="${ih}" fill="transparent"/>
+      </g>`).join('');
+    const grid = [0, Math.round(max/2), max].map((value) => {
+      const gy = y(value);
+      return `<line x1="${l}" y1="${gy.toFixed(1)}" x2="${W-r}" y2="${gy.toFixed(1)}" class="history-gridline"/>
+        <text x="${l-5}" y="${(gy+3).toFixed(1)}" text-anchor="end" class="history-axis">${Math.round(value/100)/10}k</text>`;
+    }).join('');
     fuelChart = `<svg viewBox="0 0 ${W} ${H}" class="history-svg">
+      ${grid}
       ${inPoints.length > 1 ? `<path d="${api.linePath(inPoints)}" fill="none" stroke="${api.palette.clay}" stroke-width="2.3"/>` : ''}
       ${outPoints.length > 1 ? `<path d="${api.linePath(outPoints)}" fill="none" stroke="${api.palette.sage}" stroke-width="2.3"/>` : ''}
       ${inPoints.length === 1 ? `<circle cx="${inPoints[0][0]}" cy="${inPoints[0][1]}" r="3" fill="${api.palette.clay}"/>` : ''}
       ${outPoints.length === 1 ? `<circle cx="${outPoints[0][0]}" cy="${outPoints[0][1]}" r="3" fill="${api.palette.sage}"/>` : ''}
-      ${labels}</svg>`;
+      ${labels}${hits}</svg>`;
   }
   const change = d.summary.weight_change_lb;
   const changeLabel = change == null ? '—' : `${change > 0 ? '+' : ''}${change} lb`;
@@ -59,15 +82,39 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
       <div class="history-kpi"><span>nutrition coverage</span><b>${d.summary.days_with_calories}/${d.days}</b><small>protein target ${d.summary.protein_target_g || '—'}g</small></div>
     </div>
     <div class="history-grid">
-      <div class="history-panel">
-        <div class="history-panel-head"><b>Weight trajectory</b><span>raw + rolling average</span></div>
+      <div class="history-panel history-weight-panel">
+        <div class="history-panel-head"><b>Weight trajectory</b><span>hover or focus a weigh-in</span></div>
         ${lineChart(weights, ['weight_lb','avg7_lb'], [api.palette.t30, api.palette.teal], d.summary.target_lb)}
         <div class="chart-legend"><span><i style="background:${api.palette.t30}"></i>scale weight</span><span><i style="background:${api.palette.teal}"></i>7-reading average</span><span><i style="background:transparent;border-top:1px dashed ${api.palette.clay}"></i>target</span></div>
       </div>
-      <div class="history-panel">
-        <div class="history-panel-head"><b>Energy trajectory</b><span>logged intake vs measured output</span></div>
+      <div class="history-panel history-fuel-panel">
+        <div class="history-panel-head"><b>Energy trajectory</b><span>hover or focus a logged day</span></div>
         ${fuelChart}
         <div class="chart-legend"><span><i style="background:${api.palette.clay}"></i>calories in</span><span><i style="background:${api.palette.sage}"></i>calories out</span></div>
       </div>
     </div>`;
+  api.bindTooltip(mount.querySelector('.history-weight-panel'), '.history-hit', function (target) {
+    const row = weights[Number(target.dataset.index)];
+    return {
+      title: api.formatDay(row.day),
+      rows: [
+        { label: 'Scale weight', value: row.weight_lb + ' lb' },
+        { label: '7-reading average', value: row.avg7_lb + ' lb', color: api.palette.teal },
+        { label: 'Conditions', value: row.fasted ? 'Fasted' : 'Not marked fasted' },
+        { label: 'Target gap', value: d.summary.target_lb == null ? 'No target' : (row.avg7_lb-d.summary.target_lb).toFixed(1) + ' lb' },
+      ],
+    };
+  });
+  api.bindTooltip(mount.querySelector('.history-fuel-panel'), '.history-hit', function (target) {
+    const row = fuelRows[Number(target.dataset.index)];
+    return {
+      title: api.formatDay(row.day),
+      rows: [
+        { label: 'Calories in', value: row.calories_in == null ? 'Not logged' : row.calories_in.toLocaleString() + ' kcal', color: api.palette.clay },
+        { label: 'Calories out', value: row.calories_out == null ? 'No data' : row.calories_out.toLocaleString() + ' kcal', color: api.palette.sage },
+        { label: 'Energy balance', value: row.balance_kcal == null ? 'Unavailable' : (row.balance_kcal > 0 ? '+' : '') + row.balance_kcal.toLocaleString() + ' kcal' },
+        { label: 'Protein', value: row.protein_g == null ? 'Not logged' : row.protein_g + ' g' },
+      ],
+    };
+  });
 }, 60000);
