@@ -26,6 +26,18 @@ FitComp.register('cmp-overview-history', '/api/comp/overview_history', function 
   const labels = rows.map((row, i) => i % 3 ? '' :
     `<text x="${x(i).toFixed(1)}" y="${H - 7}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
   const targetY = stepY(d.targets.steps);
+  const grid = [0, .5, 1].map((ratio) => {
+    const value = Math.round(stepMax * ratio);
+    const gy = stepY(value);
+    return `<line x1="${l}" y1="${gy.toFixed(1)}" x2="${W-r}" y2="${gy.toFixed(1)}" class="history-gridline"/>
+      <text x="${l-5}" y="${(gy+3).toFixed(1)}" text-anchor="end" class="history-axis">${Math.round(value/1000)}k</text>`;
+  }).join('');
+  const hitWidth = rows.length > 1 ? iw / (rows.length - 1) : iw;
+  const hits = rows.map((row, i) =>
+    `<g class="history-hit" data-index="${i}">
+      <line x1="${x(i).toFixed(1)}" y1="${t}" x2="${x(i).toFixed(1)}" y2="${t+ih}" class="history-guide"/>
+      <rect x="${(x(i)-hitWidth/2).toFixed(1)}" y="${t}" width="${hitWidth.toFixed(1)}" height="${ih}" fill="transparent"/>
+    </g>`).join('');
   const summary = d.summary || {};
 
   mount.innerHTML = `
@@ -37,12 +49,13 @@ FitComp.register('cmp-overview-history', '/api/comp/overview_history', function 
       <div class="history-kpi"><span>resting heart rate</span><b>${summary.avg_resting_hr || '—'} bpm</b><small>14-day baseline</small></div>
     </div>
     <div class="history-panel">
-      <div class="history-panel-head"><b>Daily movement and sleep</b><span>goal ${d.targets.steps.toLocaleString()} steps · ${d.targets.sleep_hours}h sleep</span></div>
+      <div class="history-panel-head"><b>Daily movement and sleep</b><span>hover or focus a day</span></div>
       <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+        ${grid}
         <line x1="${l}" y1="${targetY.toFixed(1)}" x2="${W-r}" y2="${targetY.toFixed(1)}" stroke="${api.palette.sage}" stroke-dasharray="4 4" opacity=".35"/>
         ${bars}
         ${sleepPath ? `<path d="${sleepPath}" fill="none" stroke="${api.palette.rose}" stroke-width="2.5" stroke-linejoin="round"/>` : ''}
-        ${sleepDots}${labels}
+        ${sleepDots}${labels}${hits}
       </svg>
       <div class="chart-legend">
         <span><i style="background:${api.palette.sage};opacity:.55"></i>steps</span>
@@ -50,4 +63,17 @@ FitComp.register('cmp-overview-history', '/api/comp/overview_history', function 
         <span><i style="background:transparent;border-top:1px dashed ${api.palette.sage}"></i>step goal</span>
       </div>
     </div>`;
+  api.bindTooltip(mount.querySelector('.history-panel'), '.history-hit', function (target) {
+    const row = rows[Number(target.dataset.index)];
+    return {
+      title: api.formatDay(row.day),
+      rows: [
+        { label: 'Steps', value: row.steps == null ? 'No data' : row.steps.toLocaleString(), color: api.palette.sage },
+        { label: 'Sleep', value: row.sleep_hours == null ? 'No data' : row.sleep_hours + ' h', color: api.palette.rose },
+        { label: 'Efficiency', value: row.sleep_efficiency == null ? 'No data' : row.sleep_efficiency + '%' },
+        { label: 'HRV', value: row.hrv_ms == null ? 'No data' : row.hrv_ms + ' ms', color: api.palette.teal },
+        { label: 'Resting HR', value: row.resting_hr == null ? 'No data' : row.resting_hr + ' bpm', color: api.palette.rust },
+      ],
+    };
+  });
 }, 60000);
