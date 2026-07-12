@@ -20,6 +20,18 @@ FitComp.register('cmp-training-history', '/api/comp/training_history', function 
   const zonePath = zonePoints.length > 1 ? api.linePath(zonePoints) : '';
   const labels = rows.map((row, i) => i % 6 ? '' :
     `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" class="history-axis">${row.day.slice(5)}</text>`).join('');
+  const grid = [0, .5, 1].map((ratio) => {
+    const value = Math.round(maxDuration * ratio);
+    const gy = y(value);
+    return `<line x1="${l}" y1="${gy.toFixed(1)}" x2="${W-r}" y2="${gy.toFixed(1)}" class="history-gridline"/>
+      <text x="${l-5}" y="${(gy+3).toFixed(1)}" text-anchor="end" class="history-axis">${value}m</text>`;
+  }).join('');
+  const hitWidth = rows.length > 1 ? iw / (rows.length - 1) : iw;
+  const hits = rows.map((row, i) =>
+    `<g class="history-hit" data-index="${i}">
+      <line x1="${x(i).toFixed(1)}" y1="${t}" x2="${x(i).toFixed(1)}" y2="${t+ih}" class="history-guide"/>
+      <rect x="${(x(i)-hitWidth/2).toFixed(1)}" y="${t}" width="${hitWidth.toFixed(1)}" height="${ih}" fill="transparent"/>
+    </g>`).join('');
   const pace = (seconds) => {
     if (!seconds) return '—';
     const minutes = Math.floor(seconds/60);
@@ -42,11 +54,12 @@ FitComp.register('cmp-training-history', '/api/comp/training_history', function 
       <div class="history-kpi"><span>distance</span><b>${d.summary.distance_km} km</b><small>${d.summary.calories.toLocaleString()} exercise kcal</small></div>
     </div>
     <div class="history-panel">
-      <div class="history-panel-head"><b>Daily training load</b><span>minutes by day</span></div>
+      <div class="history-panel-head"><b>Daily training load</b><span>hover or focus a day</span></div>
       <svg viewBox="0 0 ${W} ${H}" class="history-svg">
+        ${grid}
         ${bars}
         ${zonePath ? `<path d="${zonePath}" fill="none" stroke="${api.palette.honey}" stroke-width="2.2" stroke-linejoin="round"/>` : ''}
-        ${labels}
+        ${labels}${hits}
       </svg>
       <div class="chart-legend"><span><i style="background:${api.palette.clay};opacity:.65"></i>workout duration</span><span><i style="background:${api.palette.honey}"></i>active-zone minutes</span></div>
     </div>
@@ -54,4 +67,18 @@ FitComp.register('cmp-training-history', '/api/comp/training_history', function 
       <table class="history-table"><thead><tr><th>start PT</th><th>session</th><th>duration</th><th>distance</th><th>pace</th><th>avg HR</th><th>zone load</th></tr></thead>
       <tbody>${sessions || '<tr><td colspan="7">No recent sessions</td></tr>'}</tbody></table>
     </div>`;
+  api.bindTooltip(mount.querySelector('.history-panel'), '.history-hit', function (target) {
+    const row = rows[Number(target.dataset.index)];
+    return {
+      title: api.formatDay(row.day),
+      rows: [
+        { label: 'Sessions', value: String(row.sessions) },
+        { label: 'Duration', value: row.duration_min + ' min', color: api.palette.clay },
+        { label: 'Zone load', value: row.active_zone_minutes + ' min', color: api.palette.honey },
+        { label: 'Distance', value: row.distance_km + ' km' },
+        { label: 'Average HR', value: row.avg_hr == null ? 'No data' : row.avg_hr + ' bpm', color: api.palette.rust },
+        { label: 'Exercise energy', value: row.calories.toLocaleString() + ' kcal' },
+      ],
+    };
+  });
 }, 60000);
