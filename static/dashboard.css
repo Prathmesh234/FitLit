@@ -429,24 +429,46 @@ body {
   background: rgba(34,30,22,.025);
   border: 1px solid var(--t08);
   border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 96px;
   padding: 11px 12px;
 }
 .history-kpi span {
-  color: var(--t30);
+  color: var(--t55);
   display: block;
-  font-size: 9px;
-  letter-spacing: .08em;
-  text-transform: uppercase;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: .01em;
 }
 .history-kpi b {
-  display: block;
+  align-items: baseline;
+  display: flex;
+  gap: 5px;
   font-family: var(--serif);
-  font-size: 24px;
+  font-size: clamp(23px, 2.2vw, 29px);
   font-style: italic;
   font-weight: 400;
-  margin-top: 3px;
+  line-height: 1;
+  margin-top: 8px;
+  white-space: nowrap;
 }
-.history-kpi small { color: var(--t55); display: block; font-size: 10px; margin-top: 2px; }
+.history-kpi b em {
+  color: var(--t30);
+  font-family: var(--sans);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 500;
+  letter-spacing: .02em;
+}
+.history-kpi small {
+  color: var(--t55);
+  display: block;
+  font-size: 10px;
+  line-height: 1.3;
+  margin-top: auto;
+  padding-top: 7px;
+}
 .history-grid {
   display: grid;
   gap: 14px;
@@ -461,14 +483,17 @@ body {
   position: relative;
 }
 .history-panel-head {
-  align-items: baseline;
+  align-items: center;
   display: flex;
+  gap: 12px;
   justify-content: space-between;
-  margin-bottom: 6px;
+  margin-bottom: 10px;
+  min-height: 18px;
 }
 .history-panel-head b { font-size: 11px; letter-spacing: .07em; text-transform: uppercase; }
-.history-panel-head span { color: var(--t30); font-family: var(--mono); font-size: 9px; }
+.history-panel-head span { color: var(--t30); font-family: var(--sans); font-size: 10px; text-align: right; }
 .history-svg { display: block; height: 205px; overflow: visible; width: 100%; }
+.history-svg-wide { height: 220px; }
 .history-axis { fill: var(--t30); font-family: var(--mono); font-size: 8px; }
 .history-gridline { stroke: var(--t08); stroke-width: 1; }
 .history-hit { cursor: crosshair; outline: none; }
@@ -582,5 +607,8 @@ body {
   .trace-source { display: none; }
   .history-grid { grid-template-columns: 1fr; }
   .history-svg { height: 180px; }
+  .history-svg-wide { height: 190px; }
+  .history-panel-head { align-items: flex-start; flex-direction: column; gap: 2px; }
+  .history-panel-head span { text-align: left; }
   .chart-tooltip { min-width: 160px; }
 }
