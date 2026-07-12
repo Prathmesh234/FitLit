@@ -785,6 +785,226 @@ def body_insights() -> dict:
     }
 
 
+def _calendar_days(days: int) -> list[str]:
+    today = datetime.now(PACIFIC).date()
+    return [(today - timedelta(days=offset)).isoformat() for offset in range(days - 1, -1, -1)]
+
+
+def overview_history(days: int = 14) -> dict:
+    """Cross-domain daily timeline for the high-level progress dashboard."""
+    activity = insights.activity_summary(days)
+    sleep = insights.sleep_trend(days)
+    hrv = _daily_series("dailyHeartRateVariability", "$.averageHeartRateVariabilityMilliseconds", days)
+    rhr = _daily_series("dailyRestingHeartRate", "$.beatsPerMinute", days)
+    activity_by_day = {row["day"]: row for row in activity["series"]}
+    sleep_by_day = {row["night"]: row for row in sleep["nights"]}
+    hrv_by_day = {row["day"]: _num(row["v"]) for row in hrv}
+    rhr_by_day = {row["day"]: _num(row["v"]) for row in rhr}
+    series = []
+    for day in _calendar_days(days):
+        act = activity_by_day.get(day, {})
+        night = sleep_by_day.get(day, {})
+        series.append({
+            "day": day,
+            "steps": act.get("steps"),
+            "calories_out": act.get("calories_out"),
+            "sleep_hours": night.get("hours_asleep"),
+            "sleep_efficiency": night.get("efficiency_pct"),
+            "hrv_ms": hrv_by_day.get(day),
+            "resting_hr": rhr_by_day.get(day),
+        })
+    return {
+        "days": days,
+        "series": series,
+        "summary": {
+            "avg_steps": round(_mean([row["steps"] for row in series]) or 0),
+            "avg_sleep_hours": round(_mean([row["sleep_hours"] for row in series]) or 0, 2),
+            "avg_hrv_ms": round(_mean([row["hrv_ms"] for row in series]) or 0, 1),
+            "avg_resting_hr": round(_mean([row["resting_hr"] for row in series]) or 0, 1),
+            "days_with_activity": sum(row["steps"] is not None for row in series),
+            "nights_with_sleep": sum(row["sleep_hours"] is not None for row in series),
+        },
+        "targets": {"steps": 10_000, "sleep_hours": 7.5},
+    }
+
+
+def recovery_history(days: int = 30) -> dict:
+    """Sleep volume/efficiency alongside HRV and resting-HR recovery trends."""
+    sleep = insights.sleep_trend(days)
+    hrv = _daily_series("dailyHeartRateVariability", "$.averageHeartRateVariabilityMilliseconds", days)
+    rhr = _daily_series("dailyRestingHeartRate", "$.beatsPerMinute", days)
+    sleep_by_day = {row["night"]: row for row in sleep["nights"]}
+    hrv_by_day = {row["day"]: _num(row["v"]) for row in hrv}
+    rhr_by_day = {row["day"]: _num(row["v"]) for row in rhr}
+    series = []
+    for day in _calendar_days(days):
+        night = sleep_by_day.get(day, {})
+        series.append({
+            "day": day,
+            "sleep_hours": night.get("hours_asleep"),
+            "efficiency_pct": night.get("efficiency_pct"),
+            "awake_min": night.get("awake_min"),
+            "hrv_ms": hrv_by_day.get(day),
+            "resting_hr": rhr_by_day.get(day),
+        })
+    sleep_values = [row["sleep_hours"] for row in series if row["sleep_hours"] is not None]
+    hrv_values = [row["hrv_ms"] for row in series if row["hrv_ms"] is not None]
+    rhr_values = [row["resting_hr"] for row in series if row["resting_hr"] is not None]
+    recent_sleep = _mean(sleep_values[-3:])
+    prior_sleep = _mean(sleep_values[-6:-3])
+    return {
+        "days": days,
+        "series": series,
+        "summary": {
+            "avg_sleep_hours": round(_mean(sleep_values) or 0, 2),
+            "avg_hrv_ms": round(_mean(hrv_values) or 0, 1),
+            "avg_resting_hr": round(_mean(rhr_values) or 0, 1),
+            "sleep_trend_hours": (
+                round(recent_sleep - prior_sleep, 2)
+                if recent_sleep is not None and prior_sleep is not None else None
+            ),
+            "sleep_coverage": len(sleep_values),
+        },
+        "targets": {"sleep_hours": 7.5, "efficiency_pct": 92},
+    }
+
+
+def training_history(days: int = 30) -> dict:
+    """Per-day exercise load plus recent session detail."""
+    since = (datetime.now(PACIFIC) - timedelta(days=days - 1)).strftime("%Y-%m-%d")
+    c = _ro("daily_summaries")
+    if not c:
+        return {"days": days, "series": [], "sessions": []}
+    try:
+        daily = c.execute(f"""
+            SELECT date(start_time,'{_PT}') day,
+                   COUNT(*) sessions,
+                   SUM(CAST(REPLACE(active_duration,'s','') AS REAL)) / 60.0 duration_min,
+                   SUM(COALESCE(calories_kcal,0)) calories,
+                   SUM(COALESCE(distance_millimeters,0)) / 1000000.0 distance_km,
+                   SUM(COALESCE(active_zone_minutes,0)) active_zone_minutes,
+                   AVG(CAST(json_extract(data_json,'$.metricsSummary.averageHeartRateBeatsPerMinute') AS REAL)) avg_hr
+            FROM exercise
+            WHERE date(start_time,'{_PT}') >= ?
+            GROUP BY day ORDER BY day
+        """, (since,)).fetchall()
+        recent = c.execute(f"""
+            SELECT date(start_time,'{_PT}') day,
+                   strftime('%H:%M',datetime(start_time,'{_PT}')) start,
+                   exercise_type, display_name, active_duration, calories_kcal,
+                   distance_millimeters, active_zone_minutes,
+                   json_extract(data_json,'$.metricsSummary.averageHeartRateBeatsPerMinute') avg_hr
+            FROM exercise
+            WHERE date(start_time,'{_PT}') >= ?
+            ORDER BY start_time DESC LIMIT 12
+        """, (since,)).fetchall()
+    except sqlite3.OperationalError:
+        return {"days": days, "series": [], "sessions": []}
+    finally:
+        c.close()
+
+    by_day = {row["day"]: row for row in daily}
+    series = []
+    for day in _calendar_days(days):
+        row = by_day.get(day)
+        series.append({
+            "day": day,
+            "sessions": int(row["sessions"]) if row else 0,
+            "duration_min": round(_num(row["duration_min"]), 1) if row else 0,
+            "calories": round(_num(row["calories"])) if row else 0,
+            "distance_km": round(_num(row["distance_km"]), 2) if row else 0,
+            "active_zone_minutes": round(_num(row["active_zone_minutes"])) if row else 0,
+            "avg_hr": round(_num(row["avg_hr"])) if row and row["avg_hr"] is not None else None,
+        })
+    sessions = []
+    for row in recent:
+        duration_seconds = _num(str(row["active_duration"] or "").rstrip("s"))
+        distance_km = _num(row["distance_millimeters"]) / 1_000_000
+        pace_seconds_km = duration_seconds / distance_km if distance_km else None
+        sessions.append({
+            "day": row["day"],
+            "start": row["start"],
+            "type": row["exercise_type"],
+            "name": row["display_name"],
+            "duration_min": round(duration_seconds / 60, 1),
+            "calories": round(_num(row["calories_kcal"])),
+            "distance_km": round(distance_km, 2),
+            "active_zone_minutes": round(_num(row["active_zone_minutes"])),
+            "avg_hr": round(_num(row["avg_hr"])) if row["avg_hr"] is not None else None,
+            "pace_seconds_km": round(pace_seconds_km) if pace_seconds_km else None,
+        })
+    return {
+        "days": days,
+        "series": series,
+        "sessions": sessions,
+        "summary": {
+            "sessions": sum(row["sessions"] for row in series),
+            "duration_min": round(sum(row["duration_min"] for row in series)),
+            "calories": sum(row["calories"] for row in series),
+            "distance_km": round(sum(row["distance_km"] for row in series), 2),
+            "active_zone_minutes": sum(row["active_zone_minutes"] for row in series),
+        },
+    }
+
+
+def body_history(days: int = 90) -> dict:
+    """Weight trajectory and daily fuel data against the recomposition target."""
+    weights = journal.recent_weights(limit=max(days * 3, 90))
+    since = _calendar_days(days)[0]
+    latest_by_day: dict[str, dict] = {}
+    for row in weights:
+        if row["date"] >= since:
+            latest_by_day.setdefault(row["date"], row)
+    ordered_weights = [latest_by_day[day] for day in sorted(latest_by_day)]
+    weight_series = []
+    window: list[float] = []
+    for row in ordered_weights:
+        window.append(row["weight_lb"])
+        window[:] = window[-7:]
+        conditions = (row.get("conditions") or "").lower()
+        weight_series.append({
+            "day": row["date"],
+            "weight_lb": row["weight_lb"],
+            "avg7_lb": round(sum(window) / len(window), 1),
+            "fasted": "fasted" in conditions and "not fasted" not in conditions,
+        })
+
+    meals = {row["date"]: row for row in journal.recent_meals(limit=days)}
+    activity = {row["day"]: row for row in insights.activity_summary(days)["series"]}
+    fuel_series = []
+    for day in _calendar_days(days):
+        meal = meals.get(day, {})
+        act = activity.get(day, {})
+        calories_in = meal.get("total_kcal")
+        calories_out = act.get("calories_out")
+        fuel_series.append({
+            "day": day,
+            "calories_in": calories_in,
+            "calories_out": calories_out,
+            "balance_kcal": (
+                calories_in - calories_out
+                if calories_in is not None and calories_out is not None else None
+            ),
+            "protein_g": meal.get("total_protein_g"),
+        })
+    plan = recomp.plan()
+    averages = [row["avg7_lb"] for row in weight_series]
+    return {
+        "days": days,
+        "weights": weight_series,
+        "fuel": fuel_series,
+        "waist": list(reversed(journal.recent_waist(24))),
+        "summary": {
+            "latest_avg7_lb": averages[-1] if averages else None,
+            "weight_change_lb": round(averages[-1] - averages[0], 1) if len(averages) >= 2 else None,
+            "target_lb": plan.get("target", {}).get("weight_lb"),
+            "protein_target_g": protein.target_g().get("recommended_g"),
+            "days_with_calories": sum(row["calories_in"] is not None for row in fuel_series),
+            "days_with_protein": sum(row["protein_g"] is not None for row in fuel_series),
+        },
+    }
+
+
 # Dispatch table for /api/comp/{name}
 REGISTRY = {
     "hypnogram": hypnogram,
@@ -799,6 +1019,10 @@ REGISTRY = {
     "sleep_insights": sleep_insights,
     "training_trace": training_trace,
     "body_insights": body_insights,
+    "overview_history": overview_history,
+    "recovery_history": recovery_history,
+    "training_history": training_history,
+    "body_history": body_history,
 }
 
 
