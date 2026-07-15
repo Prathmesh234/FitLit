@@ -186,7 +186,7 @@ def get_access_token(*, force_refresh: bool = False, now: float | None = None) -
 # --------------------------------------------------------------------------- #
 # `login` — one-time consent exchange to capture a refresh token.
 # --------------------------------------------------------------------------- #
-def _build_consent_url() -> str:
+def _build_consent_url(state: str | None = None) -> str:
     params = {
         "client_id": config.OAUTH_CLIENT_ID,
         "redirect_uri": config.OAUTH_REDIRECT_URI,
@@ -195,6 +195,8 @@ def _build_consent_url() -> str:
         "prompt": "consent",        # ← forces it even on re-consent
         "scope": " ".join(config.SCOPES),
     }
+    if state:
+        params["state"] = state
     return f"{config.OAUTH_AUTH_URI}?{urllib.parse.urlencode(params)}"
 
 
