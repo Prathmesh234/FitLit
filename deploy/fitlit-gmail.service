@@ -1,0 +1,14 @@
+[Unit]
+Description=FitLit Gmail health notification check
+After=network-online.target fitlit.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=azureuser
+WorkingDirectory=/home/azureuser/FitLit
+ExecStart=/home/azureuser/.local/bin/uv run python -m fitlit.gmail_service run
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
