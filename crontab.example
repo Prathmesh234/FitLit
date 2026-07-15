@@ -4,12 +4,12 @@
 # 10-second cadence and per-fetcher scheduling. cron's only job is to make sure
 # the orchestrator process is alive.
 #
-# Install with:  crontab crontab.example   (adjust the absolute path first)
+# Replace /absolute/path/to/FitLit before installing.
 #
 # --- Option A (recommended): start once at boot, let it loop forever ----------
-@reboot cd /Users/prathmeshbhatt/Desktop/FitLit && /usr/bin/env uv run python -m fitlit.orchestrator >> data/state/orchestrator.log 2>&1
+@reboot cd /absolute/path/to/FitLit && /usr/bin/env uv run python -m fitlit.orchestrator >> data/state/orchestrator.log 2>&1
 
 # --- Option B: minute-cron watchdog --------------------------------------------
 # If you'd rather not run a long-lived daemon, run a single dispatch tick every
 # minute instead (coarser than 10s, but pure cron). Comment out Option A and use:
-# * * * * * cd /Users/prathmeshbhatt/Desktop/FitLit && /usr/bin/env uv run python -m fitlit.orchestrator --once >> data/state/orchestrator.log 2>&1
+# * * * * * cd /absolute/path/to/FitLit && /usr/bin/env uv run python -m fitlit.orchestrator --once >> data/state/orchestrator.log 2>&1

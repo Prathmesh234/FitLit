@@ -24,6 +24,10 @@ data/db/
 data/state/
 data/archive/
 
+# Local coaching context may contain health, diet, location, or body data.
+AGENTS.md
+data/Body-Comp-HandOff/
+
 # Editor / OS
 .idea/
 .vscode/

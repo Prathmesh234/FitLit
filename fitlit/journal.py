@@ -213,7 +213,7 @@ def log_waist(
     date: Optional[str] = None,
     note: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Record a waist / suprailiac measurement (the body-comp handoff's #2 metric)."""
+    """Record a waist / suprailiac measurement for longitudinal tracking."""
     row = {"date": date or today(), "navel_in": navel_in,
            "suprailiac_in": suprailiac_in, "note": note}
     with connect() as conn:

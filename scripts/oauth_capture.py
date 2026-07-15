@@ -8,7 +8,7 @@ On a remote VM the browser is on your laptop, so bridge the redirect with an SSH
 local-forward, then approve in your laptop browser:
 
     # on your laptop (new terminal):
-    ssh -N -L 8765:localhost:8765 azureuser@<vm-ip>
+    ssh -N -L 8765:localhost:8765 <user>@<vm-host>
 
     # on the VM:
     uv run python scripts/oauth_capture.py
@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
     print("\n1. On your LAPTOP, open this URL in a browser and approve:\n")
     print("   " + consent_url + "\n")
     print(f"2. Waiting for the redirect on http://localhost:{PORT}/callback ...")
-    print("   (bridge it with:  ssh -N -L 8765:localhost:8765 azureuser@<vm-ip>)\n")
+    print("   (bridge it with:  ssh -N -L 8765:localhost:8765 <user>@<vm-host>)\n")
 
     with socketserver.TCPServer((HOST, PORT), _Handler) as httpd:
         httpd.timeout = 1
