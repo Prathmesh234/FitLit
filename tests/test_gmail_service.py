@@ -8,7 +8,13 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from fitlit import gmail_auth, gmail_client
-from fitlit.gmail_service import Notification, NotificationStore, build_candidates, dispatch
+from fitlit.gmail_service import (
+    Notification,
+    NotificationStore,
+    _dated_subject,
+    build_candidates,
+    dispatch,
+)
 from fitlit.gmail_templates import report
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
@@ -135,6 +141,16 @@ class GmailPolicyTests(unittest.TestCase):
         dispatch([item], self.store, self.now, sender=fail)
         result = dispatch([item], self.store, self.now, sender=self.sender)
         self.assertEqual(1, len(result["sent"]))
+
+    def test_sleep_and_workout_subjects_share_dated_format(self) -> None:
+        self.assertEqual(
+            "FitLit Sleep | Jul 14 | 7.03h · 95%",
+            _dated_subject("Sleep", self.now, "7.03h · 95%"),
+        )
+        self.assertEqual(
+            "FitLit Workout | Jul 14 | 85 min · 118 avg BPM",
+            _dated_subject("Workout", self.now, "85 min · 118 avg BPM"),
+        )
 
 
 if __name__ == "__main__":
