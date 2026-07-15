@@ -50,6 +50,10 @@ def _duration_seconds(value) -> float:
     return _num(str(value or "").rstrip("s"))
 
 
+def _dated_subject(kind: str, when: datetime, summary: str) -> str:
+    return f"FitLit {kind} | {when.strftime('%b %-d')} | {summary}"
+
+
 def _ro(db_name: str) -> sqlite3.Connection | None:
     path = config.DB_DIR / f"{db_name}.db"
     if not path.exists():
@@ -245,6 +249,10 @@ def _sleep_candidate(now: datetime) -> Notification | None:
     asleep = _num(summary.get("minutesAsleep"))
     in_bed = _num(summary.get("minutesInSleepPeriod"))
     awake = _num(summary.get("minutesAwake"))
+    latency = (
+        _num(summary.get("minutesToFallAsleep"))
+        if summary.get("minutesToFallAsleep") is not None else None
+    )
     efficiency = 100 * asleep / in_bed if in_bed else 0
     stages = {
         str(stage.get("type", "")).lower(): _num(stage.get("minutes"))
@@ -259,7 +267,7 @@ def _sleep_candidate(now: datetime) -> Notification | None:
     )
     avg_hours = trend.get("avg_hours_asleep")
     delta = asleep / 60 - avg_hours if avg_hours is not None else None
-    subject = f"FitLit Sleep | {asleep / 60:.2f}h · {efficiency:.0f}%"
+    subject = _dated_subject("Sleep", end, f"{asleep / 60:.2f}h · {efficiency:.0f}%")
     sleep_report = report(
         subject=subject,
         kicker="Morning recovery",
@@ -272,7 +280,9 @@ def _sleep_candidate(now: datetime) -> Notification | None:
             Metric("REM", f"{stages.get('rem', 0):.0f}", "min", "#b07766"),
         ],
         details=[
+            ("Date", end.strftime("%A, %B %-d, %Y")),
             ("Sleep window", f"{start.strftime('%-I:%M %p')} – {end.strftime('%-I:%M %p')}"),
+            ("Time to sleep", f"{latency:.0f} min" if latency is not None else "Unavailable"),
             ("Awake", f"{awake:.0f} min"),
             ("7-day duration", f"{avg_hours:.2f} h" if avg_hours is not None else "No baseline"),
             ("Vs 7-day average", f"{delta:+.2f} h" if delta is not None else "No baseline"),
@@ -323,12 +333,19 @@ def _formal_workout_candidates(now: datetime) -> list[Notification]:
         steps = int(_num(summary.get("steps")))
         calories = int(_num(row["calories_kcal"]))
         title = row["display_name"] or exercise_type.replace("_", " ").title()
-        subject = f"FitLit Workout | {duration_min:.0f} min · {max(avg_hr, 0):.0f} avg BPM"
+        subject = _dated_subject(
+            "Workout",
+            started,
+            f"{duration_min:.0f} min · {max(avg_hr, 0):.0f} avg BPM",
+        )
         workout_report = report(
             subject=subject,
             kicker="Workout complete",
             title=title,
-            subtitle=f"{started.strftime('%-I:%M %p')} – {ended.strftime('%-I:%M %p')} PT",
+            subtitle=(
+                f"{started.strftime('%A, %B %-d')} · "
+                f"{started.strftime('%-I:%M %p')} – {ended.strftime('%-I:%M %p')} PT"
+            ),
             metrics=[
                 Metric("Duration", f"{duration_min:.0f}", "min", "#bd6a4a"),
                 Metric("Average HR", f"{avg_hr:.0f}" if avg_hr >= 0 else "—", "bpm", "#a94e33"),
@@ -336,6 +353,7 @@ def _formal_workout_candidates(now: datetime) -> list[Notification]:
                 Metric("Exercise energy", f"{calories:,}", "kcal", "#c8973f"),
             ],
             details=[
+                ("Date", started.strftime("%A, %B %-d, %Y")),
                 ("Steps", f"{steps:,}"),
                 ("Active-zone load", f"{zone_min:.0f} min"),
                 ("Exercise type", exercise_type.replace("_", " ").title()),
@@ -425,12 +443,19 @@ def _inferred_workout_candidate(now: datetime, formal: list[Notification]) -> No
     zone_text = " · ".join(
         [f"Below Z1 {below}m"] + [f"{name} {minutes}m" for name, minutes in zones.items() if minutes]
     )
-    subject = f"FitLit Workout | {duration_min} min · {avg_hr:.0f} avg · {max_hr} peak"
+    subject = _dated_subject(
+        "Workout",
+        start_time,
+        f"{duration_min} min · {avg_hr:.0f} avg · {max_hr} peak",
+    )
     workout_report = report(
         subject=subject,
         kicker="Training-like session detected",
         title="Workout summary",
-        subtitle=f"{start_time.strftime('%-I:%M %p')} – {end_time.strftime('%-I:%M %p')} PT · inferred",
+        subtitle=(
+            f"{start_time.strftime('%A, %B %-d')} · "
+            f"{start_time.strftime('%-I:%M %p')} – {end_time.strftime('%-I:%M %p')} PT · inferred"
+        ),
         metrics=[
             Metric("Duration", str(duration_min), "min", "#bd6a4a"),
             Metric("Average HR", f"{avg_hr:.0f}", "bpm", "#a94e33"),
@@ -438,6 +463,7 @@ def _inferred_workout_candidate(now: datetime, formal: list[Notification]) -> No
             Metric("Recovery", f"{recovery:.0f}", "bpm drop", "#7c8154"),
         ],
         details=[
+            ("Date", start_time.strftime("%A, %B %-d, %Y")),
             ("90th percentile HR", f"{p90} bpm"),
             ("Movement", f"{sum(point.get('steps', 0) for point in session):,} steps"),
             ("Heart-rate distribution", zone_text),
