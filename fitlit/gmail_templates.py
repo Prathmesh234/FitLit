@@ -20,6 +20,42 @@ class Report:
     html: str
 
 
+def append_ai_insight(
+    rendered: Report,
+    *,
+    headline: str,
+    observations: tuple[str, ...],
+    confidence: float,
+    provider: str,
+) -> Report:
+    """Append already-validated AI text while escaping every rendered value."""
+    items = "".join(
+        f'<li style="margin:7px 0">{html.escape(item)}</li>' for item in observations
+    )
+    block = (
+        '<div style="margin-top:16px;border:1px solid #d8d0c0;border-radius:12px;'
+        'padding:13px;background:#f8f4eb">'
+        '<div style="font:600 10px Arial,sans-serif;letter-spacing:1.5px;'
+        'text-transform:uppercase;color:#817a6c">AI observations</div>'
+        f'<div style="margin-top:6px;font:italic 18px Georgia,serif;color:#28231b">'
+        f'{html.escape(headline)}</div>'
+        f'<ul style="margin:8px 0 0;padding-left:18px;font:13px Arial,sans-serif;'
+        f'line-height:1.45;color:#4d473d">{items}</ul>'
+        f'<div style="margin-top:8px;font:10px Arial,sans-serif;color:#9a9385">'
+        f'{html.escape(provider.title())} · confidence {confidence:.0%}</div></div>'
+    )
+    marker = '<div style="margin-top:20px;padding-top:12px;'
+    enriched_html = rendered.html.replace(marker, block + marker, 1)
+    enriched_text = "\n".join([
+        rendered.text,
+        "",
+        f"AI observations — {headline}",
+        *(f"- {item}" for item in observations),
+        f"{provider.title()} · confidence {confidence:.0%}",
+    ])
+    return Report(subject=rendered.subject, text=enriched_text, html=enriched_html)
+
+
 def report(
     *,
     subject: str,
@@ -76,4 +112,3 @@ def report(
     if note:
         plain.extend(["", note])
     return Report(subject=subject, text="\n".join(plain), html=body)
-
