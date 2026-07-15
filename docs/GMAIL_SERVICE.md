@@ -60,10 +60,54 @@ Official references:
 5. Install and enable the timer:
 
    ```bash
-   sudo cp deploy/fitlit-gmail.service deploy/fitlit-gmail.timer /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now fitlit-gmail.timer
+   sudo uv run python scripts/install_services.py --install --start
    ```
+
+## Optional AI observations
+
+The event detector, immutable IDs, overlap checks, daily cap, reserved slot,
+and delivery decision remain deterministic. AI is called only after a message
+has successfully reserved a ledger slot, and only for sleep, workout, or
+high-signal heart reports. A normal day therefore makes roughly 2–5 model calls,
+not 96 timer-interval calls.
+
+The subprocess receives a shallow allowlisted object of numerical metrics and a
+controlled report type. It does not receive the Gmail address, OAuth tokens,
+database files, `.env`, names, local coaching documents, or raw wearable JSON.
+It runs from a fresh empty temporary directory with tools/instructions disabled,
+a hard timeout, a minimal environment, and no persistent session. Output must
+match a strict object containing one short headline, at most three
+observations, and confidence from 0–1. Invalid, failed, unavailable, or timed-out
+providers are discarded and the original deterministic report is still sent.
+
+Supported CLI providers:
+
+| Provider | Noninteractive contract |
+|---|---|
+| GitHub Copilot CLI | `copilot --prompt ... --silent`, custom instructions/MCP/remote/tools disabled |
+| OpenAI Codex CLI | `codex exec --ephemeral --sandbox read-only --output-schema ...` |
+| Claude Code | `claude --bare --print --json-schema ... --tools "" --no-session-persistence` |
+
+Configure in the ignored `.env`:
+
+```ini
+FITLIT_AI_ENABLED=true
+FITLIT_AI_PROVIDER=auto
+FITLIT_AI_PROVIDER_ORDER=copilot,codex,claude
+FITLIT_AI_TIMEOUT_SECONDS=45
+```
+
+`auto` tries installed providers in order. Authenticate the chosen CLI as its
+own documentation requires. Claude `--bare` requires API-key/provider
+credentials rather than the normal OAuth/keychain session. Provider credentials
+must stay outside source control.
+
+References:
+
+- <https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli>
+- <https://learn.chatgpt.com/docs/non-interactive-mode>
+- <https://learn.chatgpt.com/docs/auth>
+- <https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-headless>
 
 ## Operation
 

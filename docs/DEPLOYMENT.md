@@ -1,10 +1,8 @@
-# FitLit — Azure VM deployment & remaining work
+# FitLit — VM deployment and operations
 
-This is the running checklist for getting FitLit live on an Azure VM and the
-work still outstanding (chiefly **OAuth**). Today the code assumes a Google
-access token is simply present in the environment; this doc covers how to
-obtain it, how to set the env vars, and what we still need to build to keep it
-fresh for a lifetime of polling.
+This guide covers a durable Linux VM deployment, OAuth onboarding, systemd
+services, and operational security. Examples are intentionally independent of
+one cloud, username, home directory, or clone location.
 
 ---
 
@@ -19,13 +17,7 @@ fresh for a lifetime of polling.
 | FastAPI server + Dockerfile | ✅ done |
 | Get a Google OAuth token (consent flow) | ✅ done — refresh token captured, live data flowing |
 | OAuth refresh handling in code | ✅ done — [`fitlit/auth.py`](../fitlit/auth.py) |
-| Run on the VM (systemd) | ✅ done — `fitlit.service` enabled + running |
-
-**FitLit is live on the VM as of 2026-06-20.** ~12 data types are actively
-captured (heartRate, steps, distance, active/zone minutes, activityLevel,
-sedentaryPeriod, timeInHeartRateZone, dailyHeartRateZones, weight, height,
-sleep). See [§7 Known issues & scaling](#7-known-issues--scaling-roadmap) for the
-data types still returning `400` and the SQLite growth plan.
+| Portable systemd installer | ✅ done — [`scripts/install_services.py`](../scripts/install_services.py) |
 
 ---
 
@@ -232,32 +224,19 @@ unattended run.
 
 ---
 
-## 5. Run it 24/7 on the VM (systemd)  ✅ installed
+## 5. Run it 24/7 on a VM (systemd)
 
-The all-in-one server (API + background scheduler) runs under systemd so it
-restarts on crash/reboot. **This is already installed and running on the VM** at
-`/etc/systemd/system/fitlit.service`:
+Render units from the current clone, current user, and discovered `uv` binary,
+then install and start them:
 
-```ini
-[Unit]
-Description=FitLit — Google Health fetcher + API
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=azureuser
-WorkingDirectory=/home/azureuser/FitLit
-# uv reads .env via the app; EnvironmentFile is optional/redundant.
-# Bind to localhost only — the API has no auth, so it's reached via SSH tunnel,
-# never exposed on a public interface. (See §8 Security.)
-ExecStart=/home/azureuser/.local/bin/uv run uvicorn fitlit.server:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
+```bash
+uv run python scripts/install_services.py
+sudo uv run python scripts/install_services.py --install --start
 ```
+
+The installer renders `fitlit.service`, `fitlit-gc.service`, and
+`fitlit-gmail.service` into `data/state/systemd/`, installs them with the timer,
+and never hardcodes a machine identity in the repository.
 
 Day-to-day management:
 
@@ -293,6 +272,8 @@ Alternative (cron-only, no API): a `@reboot` entry running
 | `PORT` / `HOST` | ✅ | Server bind |
 | `FITLIT_RUN_SCHEDULER` | ✅ | Run the scheduler in-process (default true) |
 | `FITLIT_TICK_SECONDS` | ✅ | Orchestrator tick (default 10) |
+| `FITLIT_AI_ENABLED` | optional | Enable validated AI observations |
+| `FITLIT_AI_PROVIDER` | optional | `auto`, `copilot`, `codex`, or `claude` |
 
 ---
 
@@ -406,7 +387,7 @@ bloat is intra-day re-fetch duplication, not aged data — so pair the GC with t
 
 ## 8. Security posture
 
-Applied on the VM (2026-06-20):
+Recommended controls:
 
 | Control | State |
 |---|---|
@@ -422,9 +403,8 @@ Operating rules:
 - **The OAuth refresh token is a master key** to the health data — readable from
   anywhere, no device needed. Never commit it, never paste it into chat/email; if
   it leaks, revoke at <https://myaccount.google.com/permissions> and re-mint.
-- **`azureuser` has passwordless sudo**, so the laptop/phone SSH *private* keys
-  effectively own the box. Never share/commit a private key (only the
-  `ssh-ed25519 …` public line); prefer a passphrase on the laptop key.
+- Treat any account with passwordless sudo as root-equivalent. Never
+  share/commit a private key; prefer a passphrase on client keys.
 - **Don't expose port 8000.** It has no authentication (`/fetchers/{name}/run`,
   `/stats`, … are open). Keep it bound to localhost + closed in the NSG. Only
   publish it behind auth + HTTPS (e.g. a reverse proxy) if ever needed.
