@@ -58,6 +58,15 @@ def _env(name: str, default: str) -> str:
     return os.environ.get(name, default)
 
 
+def _env_bool(name: str, default: bool = False) -> bool:
+    return _env(name, str(default)).lower() in ("1", "true", "yes", "on")
+
+
+def _env_optional_float(name: str) -> float | None:
+    value = os.environ.get(name, "").strip()
+    return float(value) if value else None
+
+
 # --------------------------------------------------------------------------- #
 # Google Health API target + auth
 # --------------------------------------------------------------------------- #
@@ -117,6 +126,33 @@ GMAIL_DAILY_MIN = 2
 GMAIL_DAILY_MAX = 5
 GMAIL_MORNING_FALLBACK_HOUR = int(_env("FITLIT_GMAIL_MORNING_FALLBACK_HOUR", "12"))
 GMAIL_EVENING_FILL_HOUR = int(_env("FITLIT_GMAIL_EVENING_FILL_HOUR", "20"))
+
+# Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
+# delivery stay deterministic; this layer can only add validated observations.
+AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")
+AI_PROVIDER = _env("FITLIT_AI_PROVIDER", "auto").lower()
+AI_PROVIDER_ORDER = tuple(
+    provider.strip().lower()
+    for provider in _env("FITLIT_AI_PROVIDER_ORDER", "copilot,codex,claude").split(",")
+    if provider.strip()
+)
+AI_TIMEOUT_SECONDS = max(5, int(_env("FITLIT_AI_TIMEOUT_SECONDS", "45")))
+AI_MAX_OUTPUT_CHARS = max(500, int(_env("FITLIT_AI_MAX_OUTPUT_CHARS", "6000")))
+AI_COPILOT_MODEL = _env("FITLIT_AI_COPILOT_MODEL", "")
+AI_CODEX_MODEL = _env("FITLIT_AI_CODEX_MODEL", "")
+AI_CLAUDE_MODEL = _env("FITLIT_AI_CLAUDE_MODEL", "")
+AI_CLAUDE_MAX_BUDGET_USD = _env("FITLIT_AI_CLAUDE_MAX_BUDGET_USD", "0.05")
+
+# Optional private coaching profile. Keep real values in .env, never source.
+BODY_FAT_ESTIMATE_PCT = _env_optional_float("FITLIT_BODY_FAT_ESTIMATE_PCT")
+TARGET_BODY_FAT_PCT = _env_optional_float("FITLIT_TARGET_BODY_FAT_PCT")
+HEIGHT_M = _env_optional_float("FITLIT_HEIGHT_M")
+GOAL_LABEL = _env("FITLIT_GOAL_LABEL", "personal health goal")
+TRAINING_PRIORITIES = tuple(
+    item.strip()
+    for item in _env("FITLIT_TRAINING_PRIORITIES", "").split(",")
+    if item.strip()
+)
 
 # --------------------------------------------------------------------------- #
 # Rate limiting.  Google Health rejects with 429 once quota is exceeded; the
