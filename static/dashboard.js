@@ -217,6 +217,7 @@ async function tick() {
     const d = await r.json();
     $('live-dot').className = 'dot on'; $('live-label').textContent = 'live';
     $('generated').textContent = d.generated_at + ' PT';
+    $('goal-label').textContent = d.goal_label || 'personal health goal';
 
     const errors = [];
     [

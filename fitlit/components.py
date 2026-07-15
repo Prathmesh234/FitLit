@@ -774,13 +774,7 @@ def body_insights() -> dict:
             "workouts_logged": counts.get("workout_log", 0),
         },
         "waist": waist,
-        "priorities": [
-            "Lat width + mid-back thickness",
-            "Upper chest",
-            "Rear + lateral delts",
-            "Long-head triceps",
-            "Core tonus",
-        ],
+        "priorities": list(config.TRAINING_PRIORITIES),
         "trace": trace,
     }
 

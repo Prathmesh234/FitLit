@@ -1,25 +1,18 @@
-"""Vegetarian protein tracker — hit the muscle-sparing target while cutting.
+"""Protein tracker with configurable goals and common food examples.
 
-In a deficit, protein is the lever that preserves lean mass (the body-comp
-handoff: ``1.6–2.2 g/kg/day``, skew high while cutting). The user is vegetarian,
-so this module computes their daily target from the latest weigh-in, compares it
-to logged intake, and — crucially — suggests how to close any gap using *their*
-vegetarian sources (eggs, whey, tofu, protein powder, paneer, lentils…).
-
-It reads the latest weight + logged protein from the journal; nothing here is a
-medical prescription, just the standard sports-nutrition range applied to real
-numbers. Read-only + stdlib.
+It reads the latest weight and logged protein from the journal, then compares
+intake with a standard sports-nutrition range. The source table is generic and
+contains no personal diet profile.
 """
 from __future__ import annotations
 
 from fitlit import journal
 
-# Protein per common vegetarian serving (grams). Conservative, label-typical
-# values; biased to the user's stated staples (eggs, whey, tofu, protein powder).
-VEG_SOURCES: dict[str, dict] = {
+# Protein per common serving (grams). Conservative, label-typical values.
+PROTEIN_SOURCES: dict[str, dict] = {
     "whey/protein scoop": {"protein_g": 24, "serving": "1 scoop (~30g)"},
     "egg":                {"protein_g": 6,  "serving": "1 large"},
-    "paneer":             {"protein_g": 18, "serving": "100 g"},
+    "chicken breast":     {"protein_g": 31, "serving": "100 g cooked"},
     "firm tofu":          {"protein_g": 12, "serving": "100 g"},
     "greek yogurt":       {"protein_g": 10, "serving": "100 g"},
     "lentils (cooked)":   {"protein_g": 9,  "serving": "100 g"},
@@ -79,22 +72,22 @@ def daily_status(date: str | None = None, *, cutting: bool = True) -> dict:
 
 
 def suggest_to_close(gap_g: float) -> list[str]:
-    """Greedy vegetarian combos to make up a protein gap, densest sources first."""
+    """Offer several independent serving estimates for a protein gap."""
     if gap_g <= 0:
         return []
     suggestions = []
-    for name in ("whey/protein scoop", "egg", "paneer", "firm tofu", "greek yogurt"):
-        per = VEG_SOURCES[name]["protein_g"]
+    for name in ("chicken breast", "whey/protein scoop", "firm tofu", "greek yogurt", "egg"):
+        per = PROTEIN_SOURCES[name]["protein_g"]
         n = round(gap_g / per)
         if n >= 1:
             suggestions.append(
-                f"{n}x {name} ({VEG_SOURCES[name]['serving']}) ≈ {n * per}g")
+                f"{n}x {name} ({PROTEIN_SOURCES[name]['serving']}) ≈ {n * per}g")
     return suggestions[:4]
 
 
 def sources() -> dict:
-    """The vegetarian protein reference table."""
-    return VEG_SOURCES
+    """The generic protein reference table."""
+    return PROTEIN_SOURCES
 
 
 def _latest_weight_kg() -> tuple[float | None, str | None]:

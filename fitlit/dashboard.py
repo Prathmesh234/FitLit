@@ -114,6 +114,7 @@ def snapshot() -> dict:
     return {
         "generated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
         "tz": "America/Los_Angeles",
+        "goal_label": config.GOAL_LABEL,
         "readiness": _safe(readiness.score),
         "recomp": _safe(recomp.plan),
         "recomp_progress": _safe(recomp.progress),

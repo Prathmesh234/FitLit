@@ -82,7 +82,7 @@ FitComp.register('cmp-body-history', '/api/comp/body_history', function (mount, 
     <div class="history-kpis">
       <div class="history-kpi"><span>Latest 7-day average</span><b>${d.summary.latest_avg7_lb || '—'} <em>lb</em></b><small>${weights.length} weigh-ins plotted</small></div>
       <div class="history-kpi"><span>Observed change</span><b>${changeLabel} ${changeUnit}</b><small>First to latest rolling average</small></div>
-      <div class="history-kpi"><span>Target weight</span><b>${d.summary.target_lb || '—'} <em>lb</em></b><small>Sub-15% model target</small></div>
+      <div class="history-kpi"><span>Target weight</span><b>${d.summary.target_lb || '—'} <em>lb</em></b><small>Configured model target</small></div>
       <div class="history-kpi"><span>Nutrition coverage</span><b>${d.summary.days_with_calories}/${d.days} <em>days</em></b><small>Protein target ${d.summary.protein_target_g || '—'} g</small></div>
     </div>
     <div class="history-grid">

@@ -1,35 +1,21 @@
-"""Body-recomposition tracker — the math behind the sub-15% goal.
+"""Configurable body-recomposition tracker.
 
-The user's stated goal (body-comp handoff) is **sub-15% body fat with concurrent
-hypertrophy**. The scale alone can't tell you if you're getting there — on
-creatine and lifting, bodyweight can stay flat while fat drops and muscle rises.
-This module turns the few hard numbers we *do* have into a recomposition plan:
+The scale alone cannot distinguish fat loss from lean-mass change. This module
+turns configured body-composition assumptions and logged weigh-ins into a
+simple trajectory:
 
     LBM            = weight × (1 − bodyfat%)          # lean body mass held constant
     target weight  = LBM ÷ (1 − target_bodyfat%)
     fat to lose    = current weight − target weight
 
-…then layers a *safe* rate (≈0.5–0.75%/week, the handoff's deficit guidance) to
-give an ETA and a daily-deficit target, and reads the journal's fasted weigh-ins
-to show actual progress against the plan.
-
-Body-fat % defaults to the handoff's visual estimate (~20%); pass a measured
-value (DEXA) for a hard baseline. Everything is read-only + stdlib.
+It also reads fasted weigh-ins to show actual progress. Personal estimates,
+height, and targets belong in .env rather than source control.
 """
 from __future__ import annotations
 
-from fitlit import insights, journal
+from fitlit import config, insights, journal
 
 LB_PER_KG = 2.2046226218
-
-# The body-comp handoff (data/Body-Comp-HandOff) placed the user at ~20% body fat
-# from photos (±3–4%). Used as the default until a DEXA gives a hard baseline.
-DEFAULT_BODYFAT_PCT = 20.0
-# Handoff strategy: target slightly below 15% so post-diet rebound still lands sub-15.
-DEFAULT_TARGET_BODYFAT_PCT = 14.0
-# Height on record (body.db height = 1778 mm), for BMI context.
-HEIGHT_M = 1.778
-# Safe fat-loss pace as a fraction of bodyweight per week (handoff: ~0.5–0.75%).
 DEFAULT_WEEKLY_RATE_PCT = 0.6
 # 1 kg of body fat ≈ 7700 kcal — the deficit needed to shed it.
 KCAL_PER_KG_FAT = 7700
@@ -59,16 +45,17 @@ def target_weight_kg(lbm: float, target_bodyfat_pct: float) -> float:
     return lbm / (1 - target_bodyfat_pct / 100.0)
 
 
-def bmi(weight_kg: float, height_m: float = HEIGHT_M) -> float:
+def bmi(weight_kg: float, height_m: float) -> float:
     return round(weight_kg / (height_m * height_m), 1)
 
 
 def plan(
     *,
-    bodyfat_pct: float = DEFAULT_BODYFAT_PCT,
-    target_bodyfat_pct: float = DEFAULT_TARGET_BODYFAT_PCT,
+    bodyfat_pct: float | None = None,
+    target_bodyfat_pct: float | None = None,
     weekly_rate_pct: float = DEFAULT_WEEKLY_RATE_PCT,
     weight_kg: float | None = None,
+    height_m: float | None = None,
 ) -> dict:
     """Compute the full recomposition plan from the latest fasted weight.
 
@@ -76,6 +63,18 @@ def plan(
     in weeks, and the daily calorie deficit that pace implies — all the numbers a
     coach needs to turn "the scale isn't moving" into a concrete trajectory.
     """
+    bodyfat_pct = bodyfat_pct if bodyfat_pct is not None else config.BODY_FAT_ESTIMATE_PCT
+    target_bodyfat_pct = (
+        target_bodyfat_pct
+        if target_bodyfat_pct is not None
+        else config.TARGET_BODY_FAT_PCT
+    )
+    height_m = height_m if height_m is not None else config.HEIGHT_M
+    if bodyfat_pct is None or target_bodyfat_pct is None:
+        return {
+            "error": "configure FITLIT_BODY_FAT_ESTIMATE_PCT and "
+            "FITLIT_TARGET_BODY_FAT_PCT to enable the recomposition model"
+        }
     date = None
     if weight_kg is None:
         weight_kg, date = latest_fasted_weight_kg()
@@ -94,14 +93,14 @@ def plan(
         "as_of": date,
         "assumptions": {
             "bodyfat_pct": bodyfat_pct,
-            "bodyfat_source": "body-comp handoff visual estimate (±3-4%); use DEXA for a hard baseline",
+            "bodyfat_source": "configured estimate; use a measured value for a stronger baseline",
             "target_bodyfat_pct": target_bodyfat_pct,
             "weekly_rate_pct": weekly_rate_pct,
         },
         "current": {
             "weight_kg": round(weight_kg, 1),
             "weight_lb": round(weight_kg * LB_PER_KG, 1),
-            "bmi": bmi(weight_kg),
+            "bmi": bmi(weight_kg, height_m) if height_m else None,
             "lean_mass_kg": round(lbm, 1),
             "fat_mass_kg": round(weight_kg - lbm, 1),
         },

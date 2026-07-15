@@ -19,9 +19,9 @@ FitComp.register('cmp-body-insights', '/api/comp/body_insights', function (mount
     </div>`).join('');
 
   mount.innerHTML = `
-    <div class="cmp-head"><h3>Body-plan diagnostics</h3><span class="cmp-tag">visual estimate + logged trend</span></div>
+    <div class="cmp-head"><h3>Body-plan diagnostics</h3><span class="cmp-tag">configured estimate + logged trend</span></div>
     <div class="diagnostic-kpis">
-      <div class="diagnostic-kpi"><span>body-fat model</span><b>${p.bodyfat_pct ?? '—'}% → ${p.target_bodyfat_pct ?? '—'}%</b><small>visual estimate, not DEXA</small></div>
+      <div class="diagnostic-kpi"><span>body-fat model</span><b>${p.bodyfat_pct ?? '—'}% → ${p.target_bodyfat_pct ?? '—'}%</b><small>configured estimate</small></div>
       <div class="diagnostic-kpi"><span>remaining</span><b>${p.to_go_lb ?? '—'} lb</b><small>${p.eta_weeks ?? '—'} projected weeks</small></div>
       <div class="diagnostic-kpi"><span>target pace</span><b>-${p.target_weekly_loss_lb ?? '—'} lb</b><small>per week</small></div>
       <div class="diagnostic-kpi"><span>observed pace</span><b>${pace}</b><small>requires 5+ fasted readings</small></div>
@@ -44,8 +44,8 @@ FitComp.register('cmp-body-insights', '/api/comp/body_insights', function (mount
         </div>
       </div>
       <div>
-        <div class="cmp-head"><h3>Hypertrophy priorities</h3><span class="cmp-tag">body-comp handoff</span></div>
-        <ol class="priority-list">${priorities}</ol>
+        <div class="cmp-head"><h3>Training priorities</h3><span class="cmp-tag">configured profile</span></div>
+        <ol class="priority-list">${priorities || '<li>No private priorities configured</li>'}</ol>
         <div class="cmp-head" style="margin-top:16px"><h3>Plan trace</h3><span class="cmp-tag">latest state</span></div>
         <div class="trace-list">${trace}</div>
       </div>
