@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-from fitlit import gmail_auth, gmail_client
+from fitlit import ai_insights, gmail_auth, gmail_client
 from fitlit.gmail_service import (
     Notification,
     NotificationStore,
@@ -151,6 +151,116 @@ class GmailPolicyTests(unittest.TestCase):
             "FitLit Workout | Jul 14 | 85 min · 118 avg BPM",
             _dated_subject("Workout", self.now, "85 min · 118 avg BPM"),
         )
+
+    def test_ai_enrichment_runs_only_after_reservation(self) -> None:
+        item = candidate(40)
+        item = Notification(
+            event_key=item.event_key,
+            kind=item.kind,
+            report=item.report,
+            mandatory=True,
+            ai_payload={"report_type": "sleep", "hours_asleep": 7.2},
+        )
+        insight = ai_insights.AIInsight(
+            headline="Stable sleep window",
+            observations=("7.2 hours were recorded.",),
+            confidence=0.8,
+            provider="copilot",
+        )
+        messages = []
+
+        def sender(subject: str, text: str, html: str) -> str:
+            messages.append((text, html))
+            return "message-ai"
+
+        with patch("fitlit.gmail_service.ai_insights.generate", return_value=insight) as generate:
+            dispatch([item, item], self.store, self.now, sender=sender)
+        generate.assert_called_once_with(item.ai_payload)
+        self.assertIn("Stable sleep window", messages[0][0])
+        self.assertIn("confidence 80%", messages[0][1])
+
+    def test_ai_failure_keeps_deterministic_report(self) -> None:
+        item = candidate(41)
+        item = Notification(
+            event_key=item.event_key,
+            kind=item.kind,
+            report=item.report,
+            mandatory=True,
+            ai_payload={"report_type": "workout", "duration_min": 45},
+        )
+        sent_bodies = []
+
+        def sender(subject: str, text: str, html: str) -> str:
+            sent_bodies.append(text)
+            return "message-fallback"
+
+        with patch("fitlit.gmail_service.ai_insights.generate", return_value=None):
+            result = dispatch([item], self.store, self.now, sender=sender)
+        self.assertEqual(1, len(result["sent"]))
+        self.assertNotIn("AI observations", sent_bodies[0])
+
+
+class AIInsightTests(unittest.TestCase):
+    def test_parser_rejects_extra_fields_and_long_observations(self) -> None:
+        with self.assertRaises(ai_insights.AIInsightError):
+            ai_insights.parse_response(
+                '{"headline":"ok","observations":["fine"],"confidence":0.8,"extra":1}',
+                "copilot",
+            )
+        with self.assertRaises(ai_insights.AIInsightError):
+            ai_insights.parse_response(
+                '{"headline":"ok","observations":["' + ("x" * 141) + '"],"confidence":0.8}',
+                "codex",
+            )
+
+    def test_payload_rejects_nested_or_identifying_values(self) -> None:
+        with self.assertRaises(ai_insights.AIInsightError):
+            ai_insights.sanitize_payload({"metrics": {"hours": 7}})
+        with self.assertRaises(ai_insights.AIInsightError):
+            ai_insights.sanitize_payload({"email": "person@example.com"})
+
+    def test_environment_strips_application_secrets(self) -> None:
+        clean = ai_insights.minimal_environment({
+            "PATH": "/bin",
+            "HOME": "/tmp/home",
+            "GITHUB_TOKEN": "provider-token",
+            "GMAIL_REFRESH_TOKEN": "private",
+            "FITLIT_GMAIL_TO": "person@example.com",
+            "GOOGLE_HEALTH_CLIENT_SECRET": "private",
+        })
+        self.assertEqual(
+            {"PATH": "/bin", "HOME": "/tmp/home", "GITHUB_TOKEN": "provider-token"},
+            clean,
+        )
+
+    def test_timeout_becomes_provider_error(self) -> None:
+        with patch(
+            "fitlit.ai_insights.subprocess.run",
+            side_effect=__import__("subprocess").TimeoutExpired("copilot", 1),
+        ):
+            with self.assertRaises(ai_insights.AIInsightError):
+                ai_insights._run(["copilot"], Path(tempfile.gettempdir()))
+
+    def test_codex_adapter_uses_ephemeral_read_only_schema_mode(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("fitlit.ai_insights._run", return_value="{}") as run:
+                ai_insights._codex("prompt", Path(directory))
+        command = run.call_args.args[0]
+        self.assertIn("--ephemeral", command)
+        self.assertEqual("read-only", command[command.index("--sandbox") + 1])
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("--ignore-rules", command)
+        self.assertIn("--output-schema", command)
+
+    def test_claude_adapter_disables_tools_and_persistence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("fitlit.ai_insights._run", return_value="{}") as run:
+                ai_insights._claude("prompt", Path(directory))
+        command = run.call_args.args[0]
+        self.assertIn("--bare", command)
+        self.assertEqual("", command[command.index("--tools") + 1])
+        self.assertIn("--no-session-persistence", command)
+        self.assertIn("--json-schema", command)
 
 
 if __name__ == "__main__":
