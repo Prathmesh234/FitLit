@@ -158,6 +158,15 @@ uv run uvicorn fitlit.server:app --host 0.0.0.0 --port 8000
 `FITLIT_RUN_SCHEDULER=false` runs the API without the background scheduler (e.g.
 if you prefer to run the orchestrator as a separate process/replica).
 
+### Gmail health notifications
+
+The independent Gmail service checks local FitLit data every 15 minutes and
+sends concise sleep, workout, milestone, and fallback daily reports. It enforces
+an at-most-once ledger and a hard **2–5 messages per Pacific day** policy. Gmail
+uses a separate send-only OAuth token; it cannot read mail or health data.
+Setup, policy, and operating commands are in
+[`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
+
 ### Container
 
 ```bash
