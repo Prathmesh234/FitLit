@@ -101,6 +101,24 @@ TOKEN_STATE = STATE_DIR / "token.json"
 OAUTH_REFRESH_LEEWAY_SECONDS = int(_env("GOOGLE_OAUTH_REFRESH_LEEWAY", "60"))
 
 # --------------------------------------------------------------------------- #
+# Gmail notification service. It reuses the OAuth client identity above, but
+# has its own least-privilege gmail.send refresh token and access-token cache.
+# Health metrics are read from local SQLite; the Gmail token cannot read them.
+# --------------------------------------------------------------------------- #
+GMAIL_API_BASE = _env("FITLIT_GMAIL_API_BASE", "https://gmail.googleapis.com/gmail/v1")
+GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_TO = os.environ.get("FITLIT_GMAIL_TO", "")
+GMAIL_FROM_NAME = _env("FITLIT_GMAIL_FROM_NAME", "FitLit")
+GMAIL_TOKEN_STATE = STATE_DIR / "gmail-token.json"
+GMAIL_NOTIFICATION_DB = STATE_DIR / "gmail-notifications.db"
+GMAIL_SERVICE_LOCK = STATE_DIR / "gmail-service.lock"
+GMAIL_DAILY_MIN = 2
+GMAIL_DAILY_MAX = 5
+GMAIL_MORNING_FALLBACK_HOUR = int(_env("FITLIT_GMAIL_MORNING_FALLBACK_HOUR", "12"))
+GMAIL_EVENING_FILL_HOUR = int(_env("FITLIT_GMAIL_EVENING_FILL_HOUR", "20"))
+
+# --------------------------------------------------------------------------- #
 # Rate limiting.  Google Health rejects with 429 once quota is exceeded; the
 # observed default is ~120 requests/minute/user.  We stay comfortably under it
 # and additionally honour any Retry-After the API sends back (see client.py).
