@@ -12,8 +12,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fitlit import components, config, gmail_auth, gmail_client, insights
-from fitlit.gmail_templates import Metric, Report, report
+from fitlit import ai_insights, components, config, gmail_auth, gmail_client, insights
+from fitlit.gmail_templates import Metric, Report, append_ai_insight, report
 
 try:
     import fcntl
@@ -33,6 +33,7 @@ class Notification:
     send_if_below: int | None = None
     window_start: datetime | None = None
     window_end: datetime | None = None
+    ai_payload: dict | None = None
 
 
 def _iso(value: str) -> datetime:
@@ -296,6 +297,19 @@ def _sleep_candidate(now: datetime) -> Notification | None:
         kind="sleep",
         report=sleep_report,
         mandatory=True,
+        ai_payload={
+            "report_type": "sleep",
+            "hours_asleep": round(asleep / 60, 2),
+            "efficiency_pct": round(efficiency, 1),
+            "deep_min": round(stages.get("deep", 0)),
+            "rem_min": round(stages.get("rem", 0)),
+            "awake_min": round(awake),
+            "latency_min": round(latency) if latency is not None else None,
+            "seven_day_hours": round(avg_hours, 2) if avg_hours is not None else None,
+            "vs_seven_day_hours": round(delta, 2) if delta is not None else None,
+            "hrv_ms": recovery_day.get("hrv_ms"),
+            "resting_hr_bpm": recovery_day.get("resting_hr"),
+        },
     )
 
 
@@ -367,6 +381,16 @@ def _formal_workout_candidates(now: datetime) -> list[Notification]:
             mandatory=True,
             window_start=started,
             window_end=ended,
+            ai_payload={
+                "report_type": "workout",
+                "exercise_type": exercise_type,
+                "duration_min": round(duration_min),
+                "average_hr_bpm": round(avg_hr) if avg_hr >= 0 else None,
+                "distance_km": round(distance_km, 2),
+                "calories_kcal": calories,
+                "steps": steps,
+                "active_zone_min": round(zone_min),
+            },
         ))
     return notifications
 
@@ -478,6 +502,16 @@ def _inferred_workout_candidate(now: datetime, formal: list[Notification]) -> No
         mandatory=True,
         window_start=start_time,
         window_end=end_time,
+        ai_payload={
+            "report_type": "workout",
+            "exercise_type": "INFERRED",
+            "duration_min": duration_min,
+            "average_hr_bpm": round(avg_hr),
+            "peak_hr_bpm": max_hr,
+            "p90_hr_bpm": p90,
+            "recovery_drop_bpm": round(recovery),
+            "steps": sum(point.get("steps", 0) for point in session),
+        },
     )
 
 
@@ -538,6 +572,13 @@ def _heart_signal_candidate(now: datetime, workout_detected: bool) -> Notificati
         event_key=f"heart-signal:{now.date().isoformat()}",
         kind="signal",
         report=signal_report,
+        ai_payload={
+            "report_type": "signal",
+            "peak_hr_bpm": peak,
+            "average_hr_bpm": round(average),
+            "movement_steps": steps,
+            "window_min": 15,
+        },
     )
 
 
@@ -650,11 +691,22 @@ def dispatch(
         if not store.reserve(candidate, now):
             result["skipped"].append(candidate.event_key)
             continue
+        rendered = candidate.report
+        if candidate.ai_payload:
+            insight = ai_insights.generate(candidate.ai_payload)
+            if insight:
+                rendered = append_ai_insight(
+                    rendered,
+                    headline=insight.headline,
+                    observations=insight.observations,
+                    confidence=insight.confidence,
+                    provider=insight.provider,
+                )
         try:
             message_id = sender(
-                candidate.report.subject,
-                candidate.report.text,
-                candidate.report.html,
+                rendered.subject,
+                rendered.text,
+                rendered.html,
             )
         except gmail_auth.GmailAuthError as exc:
             store.release(candidate.event_key)
