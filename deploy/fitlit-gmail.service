@@ -5,10 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-User=azureuser
-WorkingDirectory=/home/azureuser/FitLit
-ExecStart=/home/azureuser/.local/bin/uv run python -m fitlit.gmail_service run
+User=__FITLIT_USER__
+WorkingDirectory=__FITLIT_ROOT__
+EnvironmentFile=-__FITLIT_ROOT__/.env
+Environment="PATH=__FITLIT_PATH__"
+ExecStart=__UV_PATH__ run python -m fitlit.gmail_service run
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-
