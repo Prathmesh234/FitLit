@@ -11,12 +11,60 @@ mail and never uses Gmail to obtain health data.
 | Completed sleep | One morning report per immutable sleep record |
 | Completed workout | One report per Fitbit exercise record; a high-confidence heart/movement pattern can fill gaps when Fitbit misses a lifting session |
 | Interesting signal | One 10,000-step milestone and at most one unexpected low-movement heart-rate signal per day |
+| Weekly catalog | Sunday at 8:00 PM Pacific; Monday morning retry if the daily cap or a transient failure blocks Sunday delivery |
 | Daily minimum | A noon recovery fallback is used only when sleep has not synced; an evening numerical summary is sent only when fewer than two messages were delivered |
 | Daily maximum | Five attempted sends per Pacific day; nonmandatory messages stop at four to reserve one slot |
 
 The SQLite ledger at `data/state/gmail-notifications.db` and a process lock make
 delivery at-most-once across timer and manual runs. Immutable Google Health
 point names are used for sleep and formal-exercise deduplication.
+
+## Weekly performance catalog
+
+Every Sunday at 8:00 PM Pacific, FitLit builds one immutable Monday-Sunday
+catalog. The event key is the week-ending date, so the 15-minute timer can retry
+without creating duplicates. If Sunday has already reached the five-message
+cap, or Gmail temporarily fails, the same catalog remains eligible until noon
+Monday after the daily counter resets.
+
+The report is deliberately deeper than the event emails:
+
+- **Training:** trusted workout count, intentional training minutes, exercise
+  calories, active-zone minutes, distance, workout types, and a complete formal
+  session ledger.
+- **Activity:** total and average steps, total energy expenditure, daily
+  movement bars, the most active day, and coverage-aware comparison with the
+  prior week.
+- **Sleep:** average duration, efficiency, cumulative debt against 7.5 hours,
+  bedtime consistency, and week-over-week duration change.
+- **Recovery:** HRV, resting heart rate, blood oxygen, respiratory rate, and
+  prior-week changes when at least three days exist on both sides.
+- **Strain proxy:** counts days where HRV is more than 10% below the prior-week
+  baseline while resting heart rate is over 3 BPM above it. This is explicitly
+  labeled as a recovery proxy, not a direct stress measurement or diagnosis.
+- **Decisions:** deterministic standout observations and up to four next-week
+  priorities based on movement, sleep, recovery, training load, and data
+  coverage.
+
+Wearable records with impossible or internally inconsistent timing/energy stay
+visible in the workout ledger with a quality note, but are excluded from totals.
+This prevents one malformed session from silently inflating weekly calories or
+training time.
+
+Configuration:
+
+```ini
+FITLIT_GMAIL_WEEKLY_REPORT_HOUR=20
+FITLIT_GMAIL_WEEKLY_RETRY_UNTIL_HOUR=12
+```
+
+Build the current catalog locally without reserving or sending it:
+
+```bash
+uv run python -m fitlit.gmail_service weekly-preview
+uv run python -m fitlit.gmail_service weekly-preview \
+  --html data/state/weekly-preview.html
+```
 
 ## Gmail API research and design
 
@@ -66,10 +114,9 @@ Official references:
 ## Optional AI observations
 
 The event detector, immutable IDs, overlap checks, daily cap, reserved slot,
-and delivery decision remain deterministic. AI is called only after a message
-has successfully reserved a ledger slot, and only for sleep, workout, or
-high-signal heart reports. A normal day therefore makes roughly 2–5 model calls,
-not 96 timer-interval calls.
+and delivery decision remain deterministic. AI is called only after a message has successfully reserved a ledger slot, and
+only for sleep, workout, weekly, or high-signal heart reports. A normal day
+therefore makes roughly 2–5 model calls, not 96 timer-interval calls.
 
 The subprocess receives a shallow allowlisted object of numerical metrics and a
 controlled report type. It does not receive the Gmail address, OAuth tokens,
