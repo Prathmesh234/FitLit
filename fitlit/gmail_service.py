@@ -12,8 +12,22 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fitlit import ai_insights, components, config, gmail_auth, gmail_client, insights
-from fitlit.gmail_templates import Metric, Report, append_ai_insight, report
+from fitlit import (
+    ai_insights,
+    components,
+    config,
+    gmail_auth,
+    gmail_client,
+    insights,
+    weekly_catalog,
+)
+from fitlit.gmail_templates import (
+    Metric,
+    Report,
+    append_ai_insight,
+    report,
+    weekly_report,
+)
 
 try:
     import fcntl
@@ -642,6 +656,21 @@ def _evening_fill(now: datetime) -> Notification:
     )
 
 
+def _weekly_candidate(now: datetime) -> Notification | None:
+    bounds = weekly_catalog.delivery_week(now)
+    if not bounds:
+        return None
+    start, end = bounds
+    catalog = weekly_catalog.build(start, end)
+    return Notification(
+        event_key=f"weekly:{end.isoformat()}",
+        kind="weekly",
+        report=weekly_report(catalog),
+        mandatory=True,
+        ai_payload=weekly_catalog.ai_payload(catalog),
+    )
+
+
 def build_candidates(now: datetime, store: NotificationStore) -> list[Notification]:
     candidates: list[Notification] = []
     sleep = _sleep_candidate(now)
@@ -666,6 +695,9 @@ def build_candidates(now: datetime, store: NotificationStore) -> list[Notificati
     signal = _heart_signal_candidate(now, bool(formal or inferred))
     if signal:
         candidates.append(signal)
+    weekly = _weekly_candidate(now)
+    if weekly:
+        candidates.append(weekly)
     if now.hour >= config.GMAIL_EVENING_FILL_HOUR:
         candidates.append(_evening_fill(now))
     return candidates
@@ -785,7 +817,32 @@ def status() -> dict:
         "attempted_today": store.attempted_today(now.date().isoformat()),
         "daily_min": config.GMAIL_DAILY_MIN,
         "daily_max": config.GMAIL_DAILY_MAX,
+        "weekly_catalog": {
+            "weekday": "Sunday",
+            "hour_pacific": config.GMAIL_WEEKLY_REPORT_HOUR,
+            "monday_retry_until": config.GMAIL_WEEKLY_RETRY_UNTIL_HOUR,
+        },
         "recent": store.recent(),
+    }
+
+
+def preview_weekly(end: datetime | None = None, html_path: Path | None = None) -> dict:
+    local = (end or datetime.now(PACIFIC)).astimezone(PACIFIC)
+    week_start, week_end = weekly_catalog.week_bounds(local.date())
+    catalog = weekly_catalog.build(week_start, week_end)
+    rendered = weekly_report(catalog)
+    if html_path:
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(rendered.html)
+    return {
+        "subject": rendered.subject,
+        "week": catalog["week"],
+        "training": catalog["training"],
+        "activity": catalog["activity"],
+        "sleep": catalog["sleep"],
+        "recovery": catalog["recovery"],
+        "coverage": catalog["coverage"],
+        "html_path": str(html_path) if html_path else None,
     }
 
 
@@ -795,6 +852,15 @@ def main(argv: list[str] | None = None) -> int:
     run_parser = subparsers.add_parser("run", help="evaluate and send due notifications")
     run_parser.add_argument("--dry-run", action="store_true")
     subparsers.add_parser("status", help="show configuration and delivery ledger")
+    preview_parser = subparsers.add_parser(
+        "weekly-preview",
+        help="build the current weekly catalog without sending or reserving it",
+    )
+    preview_parser.add_argument(
+        "--html",
+        type=Path,
+        help="write the rendered HTML to this path",
+    )
     subparsers.add_parser("consent-url", help="print the gmail.send OAuth consent URL")
     args = parser.parse_args(argv)
 
@@ -803,6 +869,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "status":
         print(json.dumps(status(), indent=2, default=str))
+        return 0
+    if args.command == "weekly-preview":
+        print(json.dumps(preview_weekly(html_path=args.html), indent=2, default=str))
         return 0
     if args.command == "consent-url":
         if not (config.OAUTH_CLIENT_ID and config.OAUTH_CLIENT_SECRET):
