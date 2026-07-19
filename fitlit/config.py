@@ -126,6 +126,10 @@ GMAIL_DAILY_MIN = 2
 GMAIL_DAILY_MAX = 5
 GMAIL_MORNING_FALLBACK_HOUR = int(_env("FITLIT_GMAIL_MORNING_FALLBACK_HOUR", "12"))
 GMAIL_EVENING_FILL_HOUR = int(_env("FITLIT_GMAIL_EVENING_FILL_HOUR", "20"))
+GMAIL_WEEKLY_REPORT_HOUR = int(_env("FITLIT_GMAIL_WEEKLY_REPORT_HOUR", "20"))
+GMAIL_WEEKLY_RETRY_UNTIL_HOUR = int(
+    _env("FITLIT_GMAIL_WEEKLY_RETRY_UNTIL_HOUR", "12")
+)
 
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
