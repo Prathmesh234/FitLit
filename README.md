@@ -163,6 +163,11 @@ uses a separate send-only OAuth token; it cannot read mail or health data.
 Setup, policy, and operating commands are in
 [`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
 
+Every Sunday at 8 PM Pacific it also sends an in-depth weekly performance
+catalog: workout ledger, trusted exercise calories and load, daily movement,
+sleep debt/consistency, HRV, resting heart rate, blood oxygen, respiratory rate,
+coverage-aware weekly trends, data-quality notes, and next-week priorities.
+
 Optional GitHub Copilot CLI, OpenAI Codex CLI, or Claude Code enrichment adds a
 small validated observation block after deterministic reservation. AI never
 decides whether to send, receives only allowlisted metrics, and fails back to
