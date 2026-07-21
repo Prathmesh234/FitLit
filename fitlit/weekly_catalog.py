@@ -271,6 +271,36 @@ def _oxygen(start: date, end: date) -> list[dict]:
     return [values[day] for day in sorted(values)]
 
 
+def activity_records(start: date, end: date) -> list[dict]:
+    """Return daily activity rows, including the prior week for comparisons."""
+    return _activity(start, end)
+
+
+def session_records(start: date, end: date) -> list[dict]:
+    """Return normalized formal exercise sessions for an inclusive date range."""
+    return _sessions(start, end)
+
+
+def sleep_records(start: date, end: date) -> list[dict]:
+    """Return sleep opportunities, including the prior week for comparisons."""
+    return _sleep(start, end)
+
+
+def daily_metric_records(
+    table: str,
+    value_path: str,
+    start: date,
+    end: date,
+) -> list[dict]:
+    """Return one value per date from a daily summary table."""
+    return _daily_values(table, value_path, start, end)
+
+
+def oxygen_records(start: date, end: date) -> list[dict]:
+    """Return daily oxygen averages and wearable-provided bounds."""
+    return _oxygen(start, end)
+
+
 def _clock_minutes(value: str | None) -> int | None:
     if not value:
         return None
