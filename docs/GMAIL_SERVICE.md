@@ -12,12 +12,47 @@ mail and never uses Gmail to obtain health data.
 | Completed workout | One report per Fitbit exercise record; a high-confidence heart/movement pattern can fill gaps when Fitbit misses a lifting session |
 | Interesting signal | One 10,000-step milestone and at most one unexpected low-movement heart-rate signal per day |
 | Weekly catalog | Sunday at 8:00 PM Pacific; Monday morning retry if the daily cap or a transient failure blocks Sunday delivery |
-| Daily minimum | A noon recovery fallback is used only when sleep has not synced; an evening numerical summary is sent only when fewer than two messages were delivered |
+| Morning recovery | One in-depth sleep report per immutable sleep record; a noon recovery fallback is used only when sleep has not synced |
+| Evening review | One 8:00 PM Pacific day-in-review whenever a daily slot remains |
 | Daily maximum | Five attempted sends per Pacific day; nonmandatory messages stop at four to reserve one slot |
 
 The SQLite ledger at `data/state/gmail-notifications.db` and a process lock make
 delivery at-most-once across timer and manual runs. Immutable Google Health
 point names are used for sleep and formal-exercise deduplication.
+
+## Daily health reports
+
+The morning report selects the longest sleep opportunity ending on the current
+Pacific date, preventing overlapping wearable records from inflating the night.
+It includes the sleep window, onset latency, awake time, efficiency, stage
+architecture, seven-night duration and timing comparisons, HRV, resting heart
+rate, blood oxygen, respiratory rate, deterministic interpretation, and the
+full calendar date.
+
+At 8:00 PM Pacific, FitLit builds a day-in-review whenever the five-attempt cap
+still has room. Unlike the old minimum-count fallback, this is a recurring daily
+report rather than a message sent only on quiet days. It includes:
+
+- steps, goal progress, energy expenditure, trusted exercise time/calories,
+  active-zone load, sleep, and recovery vitals;
+- an eight-block movement rhythm, complete formal-workout ledger, recent
+  comparisons, and quality notes for malformed workout records;
+- deterministic day-specific facts such as recent step rank, peak movement
+  hour, exercise share of total energy, and the morning sleep result; and
+- day-of-year, ISO week, and remaining-year context.
+
+Missing optional oxygen or respiratory data is labeled unavailable rather than
+imputed. Both reports have plain-text equivalents and remain useful when AI
+enrichment is disabled or unavailable.
+
+Build either report locally without sending or reserving it:
+
+```bash
+uv run python -m fitlit.gmail_service daily-preview sleep \
+  --html data/state/sleep-preview.html
+uv run python -m fitlit.gmail_service daily-preview evening \
+  --html data/state/evening-preview.html
+```
 
 ## Weekly performance catalog
 
@@ -115,7 +150,7 @@ Official references:
 
 The event detector, immutable IDs, overlap checks, daily cap, reserved slot,
 and delivery decision remain deterministic. AI is called only after a message has successfully reserved a ledger slot, and
-only for sleep, workout, weekly, or high-signal heart reports. A normal day
+only for sleep, daily, workout, weekly, or high-signal heart reports. A normal day
 therefore makes roughly 2–5 model calls, not 96 timer-interval calls.
 
 The subprocess receives a shallow allowlisted object of numerical metrics and a
