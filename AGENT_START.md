@@ -72,11 +72,17 @@ Set `FITLIT_GMAIL_TO` only in `.env`. Preview without sending:
 ```bash
 uv run python -m fitlit.gmail_service run --dry-run
 uv run python -m fitlit.gmail_service status
+uv run python -m fitlit.gmail_service daily-preview sleep \
+  --html data/state/sleep-preview.html
+uv run python -m fitlit.gmail_service daily-preview evening \
+  --html data/state/evening-preview.html
 ```
 
 The deterministic policy sends at least two successful reports when delivery
 and data are available, attempts at most five per Pacific day, suppresses
-duplicates, and reserves the final slot for mandatory reporting.
+duplicates, and reserves the final slot for mandatory reporting. The morning
+sleep brief is keyed to the immutable sleep record; the 8 PM Pacific
+day-in-review is keyed to the Pacific calendar date.
 
 ## 5. Configure optional headless AI
 
