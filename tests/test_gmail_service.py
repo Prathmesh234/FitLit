@@ -77,7 +77,7 @@ class GmailPolicyTests(unittest.TestCase):
         self.assertEqual(4, len(result["sent"]))
         self.assertEqual(4, self.store.sent_today("2026-07-14"))
 
-    def test_evening_fill_skips_after_daily_minimum(self) -> None:
+    def test_send_if_below_skips_after_threshold(self) -> None:
         first = [candidate(1), candidate(2)]
         dispatch(first, self.store, self.now, sender=self.sender)
         fill = candidate(3, send_if_below=2)
