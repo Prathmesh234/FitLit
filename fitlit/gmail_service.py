@@ -16,11 +16,13 @@ from fitlit import (
     ai_insights,
     components,
     config,
+    daily_digest,
     gmail_auth,
     gmail_client,
     insights,
     weekly_catalog,
 )
+from fitlit.daily_templates import day_report, sleep_report
 from fitlit.gmail_templates import (
     Metric,
     Report,
@@ -237,93 +239,18 @@ class NotificationStore:
 
 
 def _sleep_candidate(now: datetime) -> Notification | None:
-    connection = _ro("sleep")
-    if not connection:
+    digest = daily_digest.build_sleep(now.date())
+    if not digest:
         return None
-    try:
-        try:
-            rows = connection.execute(
-                "SELECT name,start_time,end_time,data_json FROM sleep "
-                "WHERE end_time IS NOT NULL ORDER BY end_time DESC LIMIT 5"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            return None
-    finally:
-        connection.close()
-    selected = None
-    for row in rows:
-        ended = _iso(row["end_time"]).astimezone(PACIFIC)
-        if ended <= now and ended.date() == now.date() and now - ended <= timedelta(hours=18):
-            selected = row
-            break
-    if not selected:
+    ended = digest["sleep"]["end"]
+    if ended > now or now - ended > timedelta(hours=18):
         return None
-
-    data = json.loads(selected["data_json"]) or {}
-    summary = data.get("summary", {})
-    asleep = _num(summary.get("minutesAsleep"))
-    in_bed = _num(summary.get("minutesInSleepPeriod"))
-    awake = _num(summary.get("minutesAwake"))
-    latency = (
-        _num(summary.get("minutesToFallAsleep"))
-        if summary.get("minutesToFallAsleep") is not None else None
-    )
-    efficiency = 100 * asleep / in_bed if in_bed else 0
-    stages = {
-        str(stage.get("type", "")).lower(): _num(stage.get("minutes"))
-        for stage in summary.get("stagesSummary", [])
-    }
-    start = _iso(selected["start_time"]).astimezone(PACIFIC)
-    end = _iso(selected["end_time"]).astimezone(PACIFIC)
-    trend = insights.sleep_trend(7)
-    recovery = components.recovery_history(30)
-    recovery_day = next(
-        (row for row in recovery.get("series", []) if row["day"] == end.date().isoformat()), {}
-    )
-    avg_hours = trend.get("avg_hours_asleep")
-    delta = asleep / 60 - avg_hours if avg_hours is not None else None
-    subject = _dated_subject("Sleep", end, f"{asleep / 60:.2f}h · {efficiency:.0f}%")
-    sleep_report = report(
-        subject=subject,
-        kicker="Morning recovery",
-        title="Sleep report",
-        subtitle=end.strftime("%A, %B %-d · wake %-I:%M %p PT"),
-        metrics=[
-            Metric("Asleep", f"{asleep / 60:.2f}", "hours", "#5f8579"),
-            Metric("Efficiency", f"{efficiency:.1f}", "%", "#7c8154"),
-            Metric("Deep", f"{stages.get('deep', 0):.0f}", "min", "#5f8579"),
-            Metric("REM", f"{stages.get('rem', 0):.0f}", "min", "#b07766"),
-        ],
-        details=[
-            ("Date", end.strftime("%A, %B %-d, %Y")),
-            ("Sleep window", f"{start.strftime('%-I:%M %p')} – {end.strftime('%-I:%M %p')}"),
-            ("Time to sleep", f"{latency:.0f} min" if latency is not None else "Unavailable"),
-            ("Awake", f"{awake:.0f} min"),
-            ("7-day duration", f"{avg_hours:.2f} h" if avg_hours is not None else "No baseline"),
-            ("Vs 7-day average", f"{delta:+.2f} h" if delta is not None else "No baseline"),
-            ("HRV", f"{recovery_day.get('hrv_ms')} ms" if recovery_day.get("hrv_ms") is not None else "No data"),
-            ("Resting HR", f"{recovery_day.get('resting_hr')} bpm" if recovery_day.get("resting_hr") is not None else "No data"),
-        ],
-        note="Protect 7.5+ hours; use the trend, not one night, to adjust training.",
-    )
     return Notification(
-        event_key=f"sleep:{selected['name']}",
+        event_key=f"sleep:{digest['sleep']['record_id']}",
         kind="sleep",
-        report=sleep_report,
+        report=sleep_report(digest),
         mandatory=True,
-        ai_payload={
-            "report_type": "sleep",
-            "hours_asleep": round(asleep / 60, 2),
-            "efficiency_pct": round(efficiency, 1),
-            "deep_min": round(stages.get("deep", 0)),
-            "rem_min": round(stages.get("rem", 0)),
-            "awake_min": round(awake),
-            "latency_min": round(latency) if latency is not None else None,
-            "seven_day_hours": round(avg_hours, 2) if avg_hours is not None else None,
-            "vs_seven_day_hours": round(delta, 2) if delta is not None else None,
-            "hrv_ms": recovery_day.get("hrv_ms"),
-            "resting_hr_bpm": recovery_day.get("resting_hr"),
-        },
+        ai_payload=daily_digest.sleep_ai_payload(digest),
     )
 
 
@@ -627,32 +554,13 @@ def _morning_fallback(now: datetime) -> Notification:
 
 def _evening_fill(now: datetime) -> Notification:
     today = now.date().isoformat()
-    overview = components.overview_history(14)
-    row = next((item for item in overview.get("series", []) if item["day"] == today), {})
-    weight = insights.weight_trend(14)
-    summary_report = report(
-        subject=f"FitLit Daily | {(row.get('steps') or 0):,} steps · {row.get('calories_out') or 0:,} kcal",
-        kicker="Daily body summary",
-        title="Today in numbers",
-        subtitle=now.strftime("%A, %B %-d · %-I:%M %p PT"),
-        metrics=[
-            Metric("Steps", f"{row.get('steps') or 0:,}", "", "#7c8154"),
-            Metric("Calories out", f"{row.get('calories_out') or 0:,}", "kcal", "#c8973f"),
-            Metric("HRV", str(row.get("hrv_ms") or "—"), "ms", "#5f8579"),
-            Metric("Resting HR", str(row.get("resting_hr") or "—"), "bpm", "#a94e33"),
-        ],
-        details=[
-            ("7-day weight average", f"{weight.get('avg7_lb')} lb" if weight.get("avg7_lb") else "No data"),
-            ("Step goal", f"{(row.get('steps') or 0) / 10_000 * 100:.0f}%"),
-            ("Data date", today),
-        ],
-    )
+    digest = daily_digest.build_day(now.date())
     return Notification(
         event_key=f"daily-fill:{today}",
         kind="daily",
-        report=summary_report,
+        report=day_report(digest),
         mandatory=True,
-        send_if_below=config.GMAIL_DAILY_MIN,
+        ai_payload=daily_digest.day_ai_payload(digest),
     )
 
 
@@ -846,6 +754,33 @@ def preview_weekly(end: datetime | None = None, html_path: Path | None = None) -
     }
 
 
+def preview_daily(
+    report_type: str,
+    day: datetime | None = None,
+    html_path: Path | None = None,
+) -> dict:
+    local = (day or datetime.now(PACIFIC)).astimezone(PACIFIC)
+    if report_type == "sleep":
+        digest = daily_digest.build_sleep(local.date())
+        if not digest:
+            return {"report_type": report_type, "date": local.date().isoformat(), "available": False}
+        rendered = sleep_report(digest)
+    else:
+        digest = daily_digest.build_day(local.date())
+        rendered = day_report(digest)
+    if html_path:
+        html_path.parent.mkdir(parents=True, exist_ok=True)
+        html_path.write_text(rendered.html)
+    return {
+        "report_type": report_type,
+        "date": local.date().isoformat(),
+        "available": True,
+        "subject": rendered.subject,
+        "coverage": digest["coverage"],
+        "html_path": str(html_path) if html_path else None,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="FitLit Gmail notification service")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -861,6 +796,16 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="write the rendered HTML to this path",
     )
+    daily_parser = subparsers.add_parser(
+        "daily-preview",
+        help="build a daily email without sending or reserving it",
+    )
+    daily_parser.add_argument("report_type", choices=("sleep", "evening"))
+    daily_parser.add_argument(
+        "--html",
+        type=Path,
+        help="write the rendered HTML to this path",
+    )
     subparsers.add_parser("consent-url", help="print the gmail.send OAuth consent URL")
     args = parser.parse_args(argv)
 
@@ -872,6 +817,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "weekly-preview":
         print(json.dumps(preview_weekly(html_path=args.html), indent=2, default=str))
+        return 0
+    if args.command == "daily-preview":
+        print(json.dumps(
+            preview_daily(args.report_type, html_path=args.html),
+            indent=2,
+            default=str,
+        ))
         return 0
     if args.command == "consent-url":
         if not (config.OAUTH_CLIENT_ID and config.OAUTH_CLIENT_SECRET):
