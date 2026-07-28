@@ -29,6 +29,7 @@ def message(
     recipient: str = "person@example.com",
     body: str = "Please give me the useful details.",
     auto_submitted: str | None = None,
+    thread_id: str = "thread-1",
 ) -> dict:
     headers = [
         {"name": "From", "value": sender},
@@ -40,7 +41,7 @@ def message(
         headers.append({"name": "Auto-Submitted", "value": auto_submitted})
     return {
         "id": message_id,
-        "threadId": "thread-1",
+        "threadId": thread_id,
         "labelIds": ["SENT", "INBOX"],
         "payload": {
             "mimeType": "multipart/alternative",
@@ -137,6 +138,30 @@ class GmailInboxParsingTests(unittest.TestCase):
             command, _ = gmail_inbox._parse_message(payload)
         self.assertNotIn("nested attachment", command.question)
 
+    def test_standard_unprefixed_reply_headers_are_not_retained(self) -> None:
+        payload = message(
+            subject="Re: FitLit Ask",
+            body=(
+                "What about my workout?\n\n"
+                "From: FitLit <person@example.com>\n"
+                "Sent: Tuesday, July 28, 2026\n"
+                "To: person@example.com\n"
+                "Subject: Re: FitLit Ask\n\n"
+                "Your prior sleep answer"
+            ),
+        )
+        with (
+            patch("fitlit.config.GMAIL_TO", "person@example.com"),
+            patch("fitlit.config.GMAIL_INBOX_SUBJECT_PREFIX", "FitLit Ask:"),
+        ):
+            command, reason = gmail_inbox._parse_message(
+                payload,
+                allow_followup=True,
+            )
+        self.assertIsNone(reason)
+        self.assertEqual("What about my workout?", command.question)
+        self.assertEqual("workout", email_assistant.classify(command.question))
+
     def test_generated_reply_is_rejected_even_when_prefix_matches(self) -> None:
         payload = message(subject="Re: previous command")
         payload["payload"]["headers"].append({
@@ -150,6 +175,25 @@ class GmailInboxParsingTests(unittest.TestCase):
             command, reason = gmail_inbox._parse_message(payload)
         self.assertIsNone(command)
         self.assertEqual("FitLit-generated message rejected", reason)
+
+    def test_followup_requires_a_previously_trusted_thread(self) -> None:
+        payload = message(
+            subject="Re: FitLit Ask",
+            body="What about today?",
+        )
+        with (
+            patch("fitlit.config.GMAIL_TO", "person@example.com"),
+            patch("fitlit.config.GMAIL_INBOX_SUBJECT_PREFIX", "FitLit Ask:"),
+        ):
+            rejected, _ = gmail_inbox._parse_message(payload)
+            accepted, reason = gmail_inbox._parse_message(
+                payload,
+                allow_followup=True,
+            )
+        self.assertIsNone(rejected)
+        self.assertIsNone(reason)
+        self.assertTrue(accepted.followup)
+        self.assertEqual("What about today?", accepted.question)
 
     def test_malformed_api_json_becomes_inbox_error(self) -> None:
         response = MagicMock()
@@ -239,17 +283,17 @@ class InboxStoreTests(unittest.TestCase):
 
     def test_reservation_deduplicates_and_enforces_independent_cap(self) -> None:
         with patch("fitlit.config.GMAIL_INBOX_DAILY_MAX", 2):
-            self.assertTrue(self.store.reserve(self.command("one"), NOW))
+            self.assertTrue(self.store.reserve(self.command("one"), NOW, intent="daily"))
             self.store.finish("one", reply_id="reply-one")
-            self.assertFalse(self.store.reserve(self.command("one"), NOW))
-            self.assertTrue(self.store.reserve(self.command("two"), NOW))
+            self.assertFalse(self.store.reserve(self.command("one"), NOW, intent="daily"))
+            self.assertTrue(self.store.reserve(self.command("two"), NOW, intent="daily"))
             self.store.finish("two", reply_id="reply-two")
-            self.assertFalse(self.store.reserve(self.command("three"), NOW))
+            self.assertFalse(self.store.reserve(self.command("three"), NOW, intent="daily"))
         self.assertEqual(2, self.store.attempted_today("2026-07-27"))
 
     def test_retry_release_allows_next_attempt(self) -> None:
         command = self.command("retry")
-        self.assertTrue(self.store.reserve(command, NOW))
+        self.assertTrue(self.store.reserve(command, NOW, intent="daily"))
         self.store.retry(command.message_id, "temporary")
         self.assertEqual(1, self.store.attempted_today("2026-07-27"))
         self.assertTrue(self.store.has(command.message_id))
@@ -259,8 +303,34 @@ class InboxStoreTests(unittest.TestCase):
                 ("2000-01-01T00:00:00+00:00", command.message_id),
             )
             connection.commit()
-        self.assertTrue(self.store.reserve(command, NOW))
+        self.assertTrue(self.store.reserve(command, NOW, intent="daily"))
         self.assertEqual(2, self.store.attempted_today("2026-07-27"))
+
+    def test_thread_context_stores_intent_without_question_body(self) -> None:
+        command = self.command("context")
+        self.assertTrue(self.store.reserve(command, NOW, intent="daily"))
+        self.store.finish("context", reply_id="reply", intent="sleep")
+        self.assertEqual((True, "sleep"), self.store.thread_context("thread"))
+        with self.store._connect() as connection:
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(inbound_messages)"
+                )
+            }
+        self.assertNotIn("question", columns)
+        self.assertNotIn("body", columns)
+        self.assertIn("rfc_message_id", columns)
+
+    def test_retry_keeps_original_intent_when_thread_later_changes(self) -> None:
+        retry = self.command("retry-context")
+        self.assertTrue(self.store.reserve(retry, NOW, intent="sleep"))
+        self.store.retry(retry.message_id, "temporary")
+        later = self.command("later-context")
+        self.assertTrue(self.store.reserve(later, NOW, intent="workout"))
+        self.store.finish(later.message_id, reply_id="reply", intent="workout")
+        self.assertEqual((True, "workout"), self.store.thread_context("thread"))
+        self.assertEqual("sleep", self.store.message_intent(retry.message_id))
 
 
 class InboxProcessingTests(unittest.TestCase):
@@ -376,6 +446,213 @@ class InboxProcessingTests(unittest.TestCase):
         self.assertTrue(self.store.has("gmail-1"))
         self.assertEqual(1, self.store.attempted_today("2026-07-27"))
 
+    def test_followup_reuses_prior_intent_and_preserves_subject(self) -> None:
+        original = gmail_inbox.InboundCommand(
+            message_id="original",
+            thread_id="thread-1",
+            rfc_message_id="<original@localhost>",
+            references=None,
+            subject="FitLit Ask",
+            question="How did I sleep?",
+        )
+        self.assertTrue(self.store.reserve(original, NOW, intent="sleep"))
+        self.store.finish("original", reply_id="first-reply", intent="sleep")
+        followup = message(
+            message_id="followup",
+            subject="Re: FitLit Ask",
+            body="What about today?",
+        )
+
+        def answer(question, **kwargs):
+            self.assertEqual("What about today?", question)
+            self.assertEqual("sleep", kwargs["prior_intent"])
+            return self.answer
+
+        with ExitStack() as stack:
+            self.enter_config(stack)
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox._list_message_ids",
+                    return_value=[{"id": "followup"}],
+                )
+            )
+            stack.enter_context(
+                patch("fitlit.gmail_inbox._get_message", return_value=followup)
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.email_assistant.answer",
+                    side_effect=answer,
+                )
+            )
+            send = stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.gmail_client.send",
+                    return_value="second-reply",
+                )
+            )
+            result = gmail_inbox.process(NOW, store=self.store)
+        self.assertEqual("second-reply", result["sent"][0]["reply_id"])
+        self.assertEqual("Re: FitLit Ask", send.call_args.args[0])
+
+    def test_followup_reconciles_reply_delivered_before_ledger_finish(self) -> None:
+        original = gmail_inbox.InboundCommand(
+            message_id="original",
+            thread_id="thread-1",
+            rfc_message_id="<original@localhost>",
+            references=None,
+            subject="FitLit Ask",
+            question="How did I sleep?",
+        )
+        self.assertTrue(self.store.reserve(original, NOW, intent="sleep"))
+        followup = message(
+            message_id="followup",
+            subject="Re: FitLit Ask",
+            body="What about today?",
+        )
+        delivered_reply = {
+            "id": "delivered-reply",
+            "threadId": "thread-1",
+            "labelIds": ["SENT"],
+            "payload": {
+                "headers": [
+                    {
+                        "name": "X-FitLit-Notification",
+                        "value": "email-assistant",
+                    },
+                    {
+                        "name": "In-Reply-To",
+                        "value": "<original@localhost>",
+                    },
+                ],
+            },
+        }
+
+        with ExitStack() as stack:
+            self.enter_config(stack)
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox._list_message_ids",
+                    return_value=[{"id": "followup"}],
+                )
+            )
+            stack.enter_context(
+                patch("fitlit.gmail_inbox._get_message", return_value=followup)
+            )
+            thread = stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox._get_thread_metadata",
+                    return_value={"messages": [delivered_reply]},
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.email_assistant.answer",
+                    return_value=self.answer,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.gmail_client.send",
+                    return_value="followup-reply",
+                )
+            )
+            result = gmail_inbox.process(NOW, store=self.store)
+        thread.assert_called_once_with("thread-1")
+        self.assertEqual("followup-reply", result["sent"][0]["reply_id"])
+        self.assertEqual((True, "sleep"), self.store.thread_context("thread-1"))
+        with self.store._connect() as connection:
+            original_row = connection.execute(
+                "SELECT status,reply_id FROM inbound_messages WHERE message_id='original'"
+            ).fetchone()
+        self.assertEqual("sent", original_row["status"])
+        self.assertEqual("delivered-reply", original_row["reply_id"])
+
+    def test_established_thread_reconciles_latest_intent_before_followup(self) -> None:
+        original = gmail_inbox.InboundCommand(
+            message_id="original",
+            thread_id="thread-1",
+            rfc_message_id="<original@localhost>",
+            references=None,
+            subject="FitLit Ask",
+            question="How did I sleep?",
+        )
+        pending = gmail_inbox.InboundCommand(
+            message_id="pending",
+            thread_id="thread-1",
+            rfc_message_id="<pending@localhost>",
+            references=None,
+            subject="Re: FitLit Ask",
+            question="How was my workout?",
+            followup=True,
+        )
+        self.assertTrue(self.store.reserve(original, NOW, intent="sleep"))
+        self.store.finish("original", reply_id="first-reply", intent="sleep")
+        self.assertTrue(self.store.reserve(pending, NOW, intent="workout"))
+        followup = message(
+            message_id="followup",
+            subject="Re: FitLit Ask",
+            body="What about today?",
+        )
+        delivered_reply = {
+            "id": "pending-reply",
+            "labelIds": ["SENT"],
+            "payload": {
+                "headers": [
+                    {
+                        "name": "X-FitLit-Notification",
+                        "value": "email-assistant",
+                    },
+                    {
+                        "name": "In-Reply-To",
+                        "value": "<pending@localhost>",
+                    },
+                ],
+            },
+        }
+
+        def answer(question, **kwargs):
+            self.assertEqual("What about today?", question)
+            self.assertEqual("workout", kwargs["prior_intent"])
+            return email_assistant.EmailAnswer(
+                subject="Re: FitLit Ask | Workout | Jul 27",
+                text="Workout answer",
+                html="<p>Workout answer</p>",
+                intent="workout",
+            )
+
+        with ExitStack() as stack:
+            self.enter_config(stack)
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox._list_message_ids",
+                    return_value=[{"id": "followup"}],
+                )
+            )
+            stack.enter_context(
+                patch("fitlit.gmail_inbox._get_message", return_value=followup)
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox._get_thread_metadata",
+                    return_value={"messages": [delivered_reply]},
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.email_assistant.answer",
+                    side_effect=answer,
+                )
+            )
+            stack.enter_context(
+                patch(
+                    "fitlit.gmail_inbox.gmail_client.send",
+                    return_value="followup-reply",
+                )
+            )
+            result = gmail_inbox.process(NOW, store=self.store)
+        self.assertEqual("workout", result["sent"][0]["intent"])
+
 
 class EmailAssistantTests(unittest.TestCase):
     def test_classifies_supported_health_questions(self) -> None:
@@ -384,6 +661,10 @@ class EmailAssistantTests(unittest.TestCase):
         self.assertEqual("activity", email_assistant.classify("How many steps today?"))
         self.assertEqual("weekly", email_assistant.classify("Give me a weekly summary"))
         self.assertEqual("help", email_assistant.classify("Show commands"))
+        self.assertEqual(
+            "sleep",
+            email_assistant.classify("What about today?", prior_intent="sleep"),
+        )
 
     def test_question_text_never_reaches_ai_provider(self) -> None:
         deterministic = (
