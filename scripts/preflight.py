@@ -70,6 +70,16 @@ def collect() -> dict:
             "subscription_present": "FITLIT_GMAIL_PUBSUB_SUBSCRIPTION" in keys,
             "application_credentials_present": "GOOGLE_APPLICATION_CREDENTIALS" in keys,
         },
+        "gmail_poll": {
+            "enabled": os.environ.get(
+                "FITLIT_GMAIL_INBOX_ENABLED",
+                dotenv.get("FITLIT_GMAIL_INBOX_ENABLED", ""),
+            ).lower() in ("1", "true", "yes", "on"),
+            "interval_seconds": int(os.environ.get(
+                "FITLIT_GMAIL_INBOX_POLL_SECONDS",
+                dotenv.get("FITLIT_GMAIL_INBOX_POLL_SECONDS", "10"),
+            )),
+        },
         "systemd": bool(shutil.which("systemctl")),
         "repository": str(ROOT),
     }
