@@ -20,6 +20,7 @@ from fitlit import (
     gmail_auth,
     gmail_client,
     gmail_inbox,
+    gmail_poll,
     gmail_push,
     insights,
     weekly_catalog,
@@ -744,6 +745,7 @@ def status() -> dict:
         },
         "inbox": {
             **gmail_inbox.status(),
+            "poll": gmail_poll.status(),
             "push": gmail_push.status(),
         },
         "recent": store.recent(),
