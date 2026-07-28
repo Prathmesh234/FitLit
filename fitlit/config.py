@@ -146,6 +146,14 @@ GMAIL_INBOX_BODY_MAX_CHARS = max(
     100,
     min(10_000, int(_env("FITLIT_GMAIL_INBOX_BODY_MAX_CHARS", "2000"))),
 )
+GMAIL_PUSH_ENABLED = _env_bool("FITLIT_GMAIL_PUSH_ENABLED")
+GMAIL_PUBSUB_TOPIC = _env("FITLIT_GMAIL_PUBSUB_TOPIC", "")
+GMAIL_PUBSUB_SUBSCRIPTION = _env("FITLIT_GMAIL_PUBSUB_SUBSCRIPTION", "")
+GMAIL_WATCH_STATE = STATE_DIR / "gmail-watch.json"
+GMAIL_WATCH_RENEW_HOURS = max(
+    1,
+    min(48, int(_env("FITLIT_GMAIL_WATCH_RENEW_HOURS", "24"))),
+)
 
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
