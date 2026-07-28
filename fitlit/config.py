@@ -17,6 +17,10 @@ import os
 import pathlib
 from dataclasses import dataclass, field
 
+# Health databases, Gmail ledgers, token caches, previews, and lock files are
+# private by default even when FitLit is run outside its hardened systemd units.
+os.umask(0o077)
+
 # --------------------------------------------------------------------------- #
 # Paths
 # --------------------------------------------------------------------------- #
@@ -200,7 +204,7 @@ RUN_SCHEDULER = _env("FITLIT_RUN_SCHEDULER", "true").lower() in ("1", "true", "y
 
 # HTTP bind address. PORT follows the Azure convention (Container Apps / App
 # Service inject it); default 8000 for local use.
-HOST = _env("HOST", "0.0.0.0")
+HOST = _env("HOST", "127.0.0.1")
 PORT = int(_env("PORT", "8000"))
 
 # SQLite journal mode. WAL is best on a local disk. Over a network filesystem
