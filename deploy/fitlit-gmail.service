@@ -9,6 +9,7 @@ User=__FITLIT_USER__
 WorkingDirectory=__FITLIT_ROOT__
 EnvironmentFile=-__FITLIT_ROOT__/.env
 Environment="PATH=__FITLIT_PATH__"
+UMask=0077
 ExecStart=__UV_PATH__ run python -m fitlit.gmail_service run
 NoNewPrivileges=true
 PrivateTmp=true
