@@ -26,22 +26,53 @@ def validate_recipient(value: str) -> str:
     return address
 
 
-def _raw_message(subject: str, text: str, html: str) -> str:
+def _raw_message(
+    subject: str,
+    text: str,
+    html: str,
+    *,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+    category: str = "health-insight",
+) -> str:
     recipient = validate_recipient(config.GMAIL_TO)
     message = EmailMessage()
     message["From"] = formataddr((config.GMAIL_FROM_NAME, recipient))
     message["To"] = recipient
     message["Subject"] = subject
-    message["X-FitLit-Notification"] = "health-insight"
+    if in_reply_to:
+        message["In-Reply-To"] = in_reply_to
+    if references:
+        message["References"] = references
+    message["X-FitLit-Notification"] = category
     message.set_content(text)
     message.add_alternative(html, subtype="html")
     return base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
 
 
-def send(subject: str, text: str, html: str) -> str:
+def send(
+    subject: str,
+    text: str,
+    html: str,
+    *,
+    thread_id: str | None = None,
+    in_reply_to: str | None = None,
+    references: str | None = None,
+    category: str = "health-insight",
+) -> str:
     """Send one message and return Gmail's immutable message id."""
-    raw = _raw_message(subject, text, html)
-    body = json.dumps({"raw": raw}).encode("utf-8")
+    raw = _raw_message(
+        subject,
+        text,
+        html,
+        in_reply_to=in_reply_to,
+        references=references,
+        category=category,
+    )
+    payload = {"raw": raw}
+    if thread_id:
+        payload["threadId"] = thread_id
+    body = json.dumps(payload).encode("utf-8")
     url = f"{config.GMAIL_API_BASE}/users/me/messages/send"
     token = gmail_auth.get_access_token()
 
