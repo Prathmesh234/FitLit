@@ -180,6 +180,9 @@ An optional read-only email command channel lets the configured user send
 about sleep, workouts, activity, daily status, or the current week. It uses a
 separate `gmail.readonly` token, accepts only exact self-addressed commands,
 stores no question bodies, and cannot execute shell or write operations.
+Google Pub/Sub can trigger those commands within seconds through an outbound
+VM pull subscription; the 15-minute timer remains as a reliability fallback.
+See [`docs/GMAIL_PUSH.md`](docs/GMAIL_PUSH.md).
 
 ### Container
 
