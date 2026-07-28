@@ -213,17 +213,23 @@ def _api_json(
     path: str,
     *,
     query: dict[str, str | int] | None = None,
+    method: str = "GET",
+    body: dict | None = None,
 ) -> dict:
     url = f"{config.GMAIL_API_BASE}/users/me/{path.lstrip('/')}"
     if query:
         url += "?" + urllib.parse.urlencode(query)
     token = gmail_auth.get_inbox_access_token()
     for attempt in range(2):
+        data = json.dumps(body).encode("utf-8") if body is not None else None
         request = urllib.request.Request(
             url,
+            data=data,
+            method=method,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/json",
+                **({"Content-Type": "application/json"} if data is not None else {}),
             },
         )
         try:
@@ -332,6 +338,8 @@ def _parse_message(payload: dict) -> tuple[InboundCommand | None, str | None]:
         return None, "sender or recipient did not match configured self-address"
     if headers.get("auto-submitted", "").lower() not in ("", "no"):
         return None, "automated message rejected"
+    if headers.get("x-fitlit-notification"):
+        return None, "FitLit-generated message rejected"
     subject = headers.get("subject", "").strip()
     prefix = config.GMAIL_INBOX_SUBJECT_PREFIX
     if not prefix or not subject.startswith(prefix):
@@ -389,6 +397,7 @@ def process(
         "skipped": [],
         "ignored": [],
         "failed": [],
+        "transient_failure": False,
     }
     if not config.GMAIL_INBOX_ENABLED:
         return result
@@ -429,6 +438,7 @@ def process(
             payload = _get_message(message_id)
         except (GmailInboxError, gmail_auth.GmailAuthError) as exc:
             result["failed"].append({"message_id": message_id, "error": str(exc)})
+            result["transient_failure"] = True
             continue
         try:
             command, reason = _parse_message(payload)
@@ -499,6 +509,7 @@ def process(
             sqlite3.Error,
         ) as exc:
             store.retry(command.message_id, f"could not build answer: {exc}")
+            result["transient_failure"] = True
             result["failed"].append({
                 "message_id": command.message_id,
                 "error": f"could not build answer: {exc}",
@@ -519,11 +530,13 @@ def process(
             )
         except gmail_auth.GmailAuthError as exc:
             store.retry(command.message_id, str(exc))
+            result["transient_failure"] = True
             result["failed"].append({"message_id": command.message_id, "error": str(exc)})
             continue
         except gmail_client.GmailSendError as exc:
             if exc.retryable:
                 store.retry(command.message_id, str(exc))
+                result["transient_failure"] = True
             else:
                 store.finish(command.message_id, error=str(exc))
             result["failed"].append({"message_id": command.message_id, "error": str(exc)})
