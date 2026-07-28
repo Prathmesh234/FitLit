@@ -15,7 +15,13 @@ DEPLOY = ROOT / "deploy"
 RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
 PUSH_SERVICE_NAME = "fitlit-gmail-push.service"
-UNIT_NAMES = (*SERVICE_NAMES, PUSH_SERVICE_NAME, "fitlit-gmail.timer")
+POLL_SERVICE_NAME = "fitlit-gmail-poll.service"
+UNIT_NAMES = (
+    *SERVICE_NAMES,
+    PUSH_SERVICE_NAME,
+    POLL_SERVICE_NAME,
+    "fitlit-gmail.timer",
+)
 
 
 def _service_user() -> tuple[str, Path]:
@@ -36,14 +42,14 @@ def _find_uv(home: Path) -> Path:
     raise RuntimeError("uv was not found; install it before installing services")
 
 
-def _push_enabled() -> bool:
-    value = os.environ.get("FITLIT_GMAIL_PUSH_ENABLED")
+def _env_enabled(name: str) -> bool:
+    value = os.environ.get(name)
     if value is None:
         env_path = ROOT / ".env"
         if env_path.exists():
             for raw in env_path.read_text().splitlines():
                 key, separator, candidate = raw.partition("=")
-                if separator and key.strip() == "FITLIT_GMAIL_PUSH_ENABLED":
+                if separator and key.strip() == name:
                     value = candidate.strip().strip('"').strip("'")
                     break
     return str(value or "").lower() in ("1", "true", "yes", "on")
@@ -99,7 +105,14 @@ def install(outputs: list[Path], *, start: bool) -> None:
             "fitlit-gc.service",
             "fitlit-gmail.timer",
         ]
-        if _push_enabled():
+        if _env_enabled("FITLIT_GMAIL_INBOX_ENABLED"):
+            enabled_units.append(POLL_SERVICE_NAME)
+        else:
+            subprocess.run(
+                ["systemctl", "disable", "--now", POLL_SERVICE_NAME],
+                check=True,
+            )
+        if _env_enabled("FITLIT_GMAIL_PUSH_ENABLED"):
             enabled_units.append(PUSH_SERVICE_NAME)
         else:
             subprocess.run(
