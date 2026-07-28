@@ -95,10 +95,12 @@ Set `FITLIT_GMAIL_INBOX_ENABLED=true` only after confirming that
 `FitLit Ask:` subjects sent from and to that address, ignores HTML and
 attachments, stores no question body, and exposes read-only health summaries.
 The existing 15-minute Gmail timer handles polling; no additional daemon or
-public endpoint is required. For near-real-time delivery, follow
-[`docs/GMAIL_PUSH.md`](docs/GMAIL_PUSH.md) to create a Pub/Sub pull subscription
-and enable `fitlit-gmail-push.service`. Prefer Azure-to-Google Workload Identity
-Federation over a service-account key. Keep the timer enabled as reconciliation.
+public endpoint is required. For near-real-time delivery without more cloud
+permissions, set `FITLIT_GMAIL_INBOX_POLL_SECONDS=10` and enable
+`fitlit-gmail-poll.service` through the installer. Pub/Sub is an optional
+alternative documented in [`docs/GMAIL_PUSH.md`](docs/GMAIL_PUSH.md). Prefer
+Azure-to-Google Workload Identity Federation over a service-account key when
+using it. Keep the timer enabled as reconciliation.
 
 ## 5. Configure optional headless AI
 
