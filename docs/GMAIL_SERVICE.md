@@ -1,8 +1,10 @@
 # FitLit Gmail notification service
 
 FitLit's Gmail service checks the local health databases every 15 minutes and
-sends compact numerical reports to one configured Gmail address. It never reads
-mail and never uses Gmail to obtain health data.
+sends compact numerical reports to one configured Gmail address. Optional
+email commands can read only tightly filtered, self-addressed `FitLit Ask:`
+messages through a separate Gmail read-only credential. Gmail is never used to
+obtain health data.
 
 ## Notification policy
 
@@ -19,6 +21,60 @@ mail and never uses Gmail to obtain health data.
 The SQLite ledger at `data/state/gmail-notifications.db` and a process lock make
 delivery at-most-once across timer and manual runs. Immutable Google Health
 point names are used for sleep and formal-exercise deduplication.
+
+## Email-to-FitLit commands
+
+When explicitly enabled, the existing 15-minute timer also checks for
+self-addressed command emails. A valid command must satisfy every condition:
+
+- the sender and recipient both exactly match `FITLIT_GMAIL_TO`;
+- the subject starts exactly with `FitLit Ask:` (configurable);
+- the message is not automated mail; and
+- the question comes only from the subject suffix and bounded `text/plain`
+  body. HTML, attachments, quoted replies, and oversized content are ignored.
+
+Examples:
+
+```text
+FitLit Ask: How did I sleep?
+FitLit Ask: How was my workout today?
+FitLit Ask: How active was I today?
+FitLit Ask: Give me this week's summary
+FitLit Ask: Show commands
+```
+
+FitLit classifies each question locally into sleep, workout, activity, weekly,
+daily, or help. It reads only the corresponding local summaries and replies in
+the same Gmail thread. The email text itself is never supplied to Copilot,
+Codex, or Claude. If optional AI observations are enabled, a provider receives
+only the same shallow allowlisted numerical object used by proactive reports.
+
+Commands are read-only: they cannot execute shell commands, alter FitLit data,
+control services, or access arbitrary files. Immutable Gmail message IDs are
+stored in `data/state/gmail-inbox.db` without retaining the question body.
+Replies have an independent default limit of 20 attempts per Pacific day and
+do not consume the five proactive-notification slots.
+
+Configuration:
+
+```ini
+GMAIL_INBOX_REFRESH_TOKEN=...
+FITLIT_GMAIL_INBOX_ENABLED=true
+FITLIT_GMAIL_INBOX_SUBJECT_PREFIX=FitLit Ask:
+FITLIT_GMAIL_INBOX_DAILY_MAX=20
+FITLIT_GMAIL_INBOX_BATCH_MAX=5
+```
+
+The feature uses a separate `gmail.readonly` refresh token and access-token
+cache. That Google scope technically authorizes reading the mailbox; FitLit's
+reader enforces the self-address and subject restrictions before extracting
+content. The existing `gmail.send` token remains unable to read mail:
+
+```bash
+uv run python scripts/oauth_capture.py --gmail-inbox
+uv run python -m fitlit.gmail_service status
+uv run python -m fitlit.gmail_service run --dry-run
+```
 
 ## Daily health reports
 
@@ -109,14 +165,21 @@ The implementation follows Google's official Gmail API workflow:
 2. Encode it as base64url in the message resource's `raw` field.
 3. Call `POST https://gmail.googleapis.com/gmail/v1/users/me/messages/send`.
 
-Only `https://www.googleapis.com/auth/gmail.send` is requested. Google classifies
-this as a sensitive scope that permits sending mail on the user's behalf. The
-Gmail refresh token and access-token cache are separate from FitLit's Health
-credentials; health metrics are read from the existing local SQLite databases.
+Proactive delivery requests only
+`https://www.googleapis.com/auth/gmail.send`. The optional command inbox uses a
+second token containing only
+`https://www.googleapis.com/auth/gmail.readonly`. Google classifies readonly
+mail access as a restricted scope. For a private single-user deployment, keep
+the OAuth application and token under the operator's control; a public
+multi-user product requires Google's applicable verification and data-handling
+requirements. Both Gmail credentials remain separate from FitLit's Health
+credentials, and health metrics are read from local SQLite databases.
 
 Official references:
 
 - <https://developers.google.com/workspace/gmail/api/guides/sending>
+- <https://developers.google.com/workspace/gmail/api/guides/list-messages>
+- <https://developers.google.com/workspace/gmail/api/guides/threads>
 - <https://developers.google.com/workspace/gmail/api/auth/scopes>
 - <https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.messages/send>
 - <https://developers.google.com/identity/protocols/oauth2/web-server#offline>
@@ -140,7 +203,15 @@ Official references:
 
 4. The capture script writes `GMAIL_REFRESH_TOKEN` to the ignored `.env`.
    Configure the recipient there as `FITLIT_GMAIL_TO`.
-5. Install and enable the timer:
+5. To enable self-addressed email commands, mint the isolated read-only token:
+
+   ```bash
+   uv run python scripts/oauth_capture.py --gmail-inbox
+   ```
+
+   This writes `GMAIL_INBOX_REFRESH_TOKEN`; then set
+   `FITLIT_GMAIL_INBOX_ENABLED=true`.
+6. Install and enable the timer:
 
    ```bash
    sudo uv run python scripts/install_services.py --install --start
