@@ -34,13 +34,13 @@ class GmailPollTests(unittest.TestCase):
     def test_status_reports_bounded_interval(self) -> None:
         with (
             patch("fitlit.config.GMAIL_INBOX_ENABLED", True),
-            patch("fitlit.config.GMAIL_INBOX_POLL_SECONDS", 10),
+            patch("fitlit.config.GMAIL_INBOX_POLL_SECONDS", 5),
             patch("fitlit.gmail_poll.gmail_auth.is_inbox_configured", return_value=True),
         ):
             self.assertEqual({
                 "enabled": True,
                 "configured": True,
-                "poll_seconds": 10,
+                "poll_seconds": 5,
             }, gmail_poll.status())
 
 
