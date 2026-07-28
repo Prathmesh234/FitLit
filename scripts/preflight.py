@@ -37,6 +37,10 @@ def collect() -> dict:
         "FITLIT_AI_ENABLED",
         dotenv.get("FITLIT_AI_ENABLED", ""),
     )
+    push_enabled = os.environ.get(
+        "FITLIT_GMAIL_PUSH_ENABLED",
+        dotenv.get("FITLIT_GMAIL_PUSH_ENABLED", ""),
+    )
     env_mode = stat.S_IMODE(ENV_PATH.stat().st_mode) if ENV_PATH.exists() else None
     providers = {
         name: bool(shutil.which(name)) for name in ("copilot", "codex", "claude")
@@ -58,6 +62,13 @@ def collect() -> dict:
         "ai": {
             "enabled": ai_enabled.lower() in ("1", "true", "yes", "on"),
             "providers_installed": providers,
+        },
+        "gmail_push": {
+            "enabled": push_enabled.lower() in ("1", "true", "yes", "on"),
+            "inbox_token_present": "GMAIL_INBOX_REFRESH_TOKEN" in keys,
+            "topic_present": "FITLIT_GMAIL_PUBSUB_TOPIC" in keys,
+            "subscription_present": "FITLIT_GMAIL_PUBSUB_SUBSCRIPTION" in keys,
+            "application_credentials_present": "GOOGLE_APPLICATION_CREDENTIALS" in keys,
         },
         "systemd": bool(shutil.which("systemctl")),
         "repository": str(ROOT),
