@@ -380,9 +380,17 @@ def _parse_message(payload: dict) -> tuple[InboundCommand | None, str | None]:
         return None, "FitLit-generated message rejected"
     subject = headers.get("subject", "").strip()
     prefix = config.GMAIL_INBOX_SUBJECT_PREFIX
-    if not prefix or not subject.startswith(prefix):
+    bare_prefix = prefix.rstrip(":").rstrip()
+    if not prefix or (
+        subject != bare_prefix
+        and not subject.startswith(prefix)
+    ):
         return None, "subject prefix did not match exactly"
-    subject_question = subject[len(prefix):].strip()
+    subject_question = (
+        ""
+        if subject == bare_prefix
+        else subject[len(prefix):].strip()
+    )
     body_question = _bounded_body(body)
     question = "\n".join(
         value for value in (subject_question, body_question) if value
