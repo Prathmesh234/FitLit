@@ -19,7 +19,7 @@ class EmailAnswer:
     intent: str
 
 
-def classify(question: str) -> str:
+def classify(question: str, *, prior_intent: str | None = None) -> str:
     words = set(re.findall(r"[a-z0-9]+", question.lower()))
     if words & {"help", "commands", "examples"}:
         return "help"
@@ -31,7 +31,11 @@ def classify(question: str) -> str:
         return "workout"
     if words & {"steps", "activity", "active", "movement", "calories"}:
         return "activity"
-    return "daily"
+    return (
+        prior_intent
+        if prior_intent in {"sleep", "workout", "activity", "weekly", "daily"}
+        else "daily"
+    )
 
 
 def _fmt(value: Any, suffix: str = "", digits: int = 0) -> str:
@@ -277,10 +281,11 @@ def answer(
     *,
     now: datetime | None = None,
     include_ai: bool = True,
+    prior_intent: str | None = None,
 ) -> EmailAnswer:
     local = (now or datetime.now(PACIFIC)).astimezone(PACIFIC)
     cleaned = " ".join(question.split())
-    intent = classify(cleaned)
+    intent = classify(cleaned, prior_intent=prior_intent)
     if intent == "sleep":
         lead, metrics, observations, payload = _sleep_answer(local.date())
     elif intent == "workout":
