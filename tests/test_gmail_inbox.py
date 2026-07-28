@@ -73,6 +73,19 @@ class GmailInboxParsingTests(unittest.TestCase):
         self.assertIn("How did I sleep?", command.question)
         self.assertIn("useful details", command.question)
 
+    def test_accepts_bare_command_subject_with_question_in_body(self) -> None:
+        payload = message(
+            subject="FitLit Ask",
+            body="How was my workout today?",
+        )
+        with (
+            patch("fitlit.config.GMAIL_TO", "person@example.com"),
+            patch("fitlit.config.GMAIL_INBOX_SUBJECT_PREFIX", "FitLit Ask:"),
+        ):
+            command, reason = gmail_inbox._parse_message(payload)
+        self.assertIsNone(reason)
+        self.assertEqual("How was my workout today?", command.question)
+
     def test_rejects_wrong_sender_near_prefix_and_automated_mail(self) -> None:
         cases = [
             message(sender="you@example.com"),
