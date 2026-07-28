@@ -29,6 +29,7 @@ class InboundCommand:
     references: str | None
     subject: str
     question: str
+    followup: bool = False
 
 
 class InboxStore:
@@ -48,7 +49,9 @@ class InboxStore:
                     processed_at TEXT,
                     reply_id TEXT,
                     error TEXT,
-                    retry_after TEXT
+                    retry_after TEXT,
+                    intent TEXT,
+                    rfc_message_id TEXT
                 );
                 CREATE TABLE IF NOT EXISTS inbound_attempts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,6 +77,14 @@ class InboxStore:
             if "retry_after" not in columns:
                 connection.execute(
                     "ALTER TABLE inbound_messages ADD COLUMN retry_after TEXT"
+                )
+            if "intent" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_messages ADD COLUMN intent TEXT"
+                )
+            if "rfc_message_id" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_messages ADD COLUMN rfc_message_id TEXT"
                 )
 
     def _connect(self) -> sqlite3.Connection:
@@ -106,7 +117,64 @@ class InboxStore:
                 (day,),
             ).fetchone()[0]
 
-    def reserve(self, command: InboundCommand, now: datetime) -> bool:
+    def thread_context(self, thread_id: str | None) -> tuple[bool, str | None]:
+        if not thread_id:
+            return False, None
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT intent FROM inbound_messages "
+                "WHERE thread_id=? AND status='sent' "
+                "ORDER BY processed_at DESC LIMIT 1",
+                (thread_id,),
+            ).fetchone()
+        return (
+            bool(row),
+            str(row["intent"]) if row and row["intent"] else None,
+        )
+
+    def message_intent(self, message_id: str) -> str | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT intent FROM inbound_messages WHERE message_id=?",
+                (message_id,),
+            ).fetchone()
+        return str(row["intent"]) if row and row["intent"] else None
+
+    def pending_deliveries(self, thread_id: str | None) -> list[dict]:
+        if not thread_id:
+            return []
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT message_id,rfc_message_id FROM inbound_messages "
+                "WHERE thread_id=? AND status='sending' AND rfc_message_id IS NOT NULL",
+                (thread_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def reconcile_delivery(self, message_id: str, reply_id: str) -> None:
+        timestamp = datetime.now(timezone.utc).isoformat()
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE inbound_messages SET status='sent',processed_at=?,reply_id=?,"
+                "error=NULL,retry_after=NULL WHERE message_id=? AND status='sending'",
+                (timestamp, reply_id, message_id),
+            )
+            connection.execute(
+                "UPDATE inbound_attempts SET status='sent',finished_at=?,reply_id=?,"
+                "error=NULL WHERE id=("
+                "SELECT MAX(id) FROM inbound_attempts WHERE message_id=?"
+                ") AND status='sending'",
+                (timestamp, reply_id, message_id),
+            )
+            connection.commit()
+
+    def reserve(
+        self,
+        command: InboundCommand,
+        now: datetime,
+        *,
+        intent: str,
+    ) -> bool:
         day = now.astimezone(PACIFIC).date().isoformat()
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -126,21 +194,23 @@ class InboxStore:
             if existing:
                 connection.execute(
                     "UPDATE inbound_messages SET pacific_date=?,status='sending',"
-                    "error=NULL,retry_after=NULL "
+                    "error=NULL,retry_after=NULL,intent=?,rfc_message_id=? "
                     "WHERE message_id=?",
-                    (day, command.message_id),
+                    (day, intent, command.rfc_message_id, command.message_id),
                 )
             else:
                 connection.execute(
                     "INSERT INTO inbound_messages("
-                    "message_id,thread_id,pacific_date,status,created_at"
-                    ") VALUES(?,?,?,?,?)",
+                    "message_id,thread_id,pacific_date,status,created_at,intent,"
+                    "rfc_message_id) VALUES(?,?,?,?,?,?,?)",
                     (
                         command.message_id,
                         command.thread_id,
                         day,
                         "sending",
                         timestamp,
+                        intent,
+                        command.rfc_message_id,
                     ),
                 )
             connection.execute(
@@ -177,16 +247,19 @@ class InboxStore:
         *,
         reply_id: str | None = None,
         error: str | None = None,
+        intent: str | None = None,
     ) -> None:
         with self._connect() as connection:
             connection.execute(
-                "UPDATE inbound_messages SET status=?,processed_at=?,reply_id=?,error=? "
+                "UPDATE inbound_messages SET status=?,processed_at=?,reply_id=?,"
+                "error=?,intent=? "
                 "WHERE message_id=?",
                 (
                     "sent" if reply_id else "failed",
                     datetime.now(timezone.utc).isoformat(),
                     reply_id,
                     error,
+                    intent,
                     message_id,
                 ),
             )
@@ -250,13 +323,13 @@ class InboxStore:
 def _api_json(
     path: str,
     *,
-    query: dict[str, str | int] | None = None,
+    query: dict[str, str | int | list[str]] | None = None,
     method: str = "GET",
     body: dict | None = None,
 ) -> dict:
     url = f"{config.GMAIL_API_BASE}/users/me/{path.lstrip('/')}"
     if query:
-        url += "?" + urllib.parse.urlencode(query)
+        url += "?" + urllib.parse.urlencode(query, doseq=True)
     token = gmail_auth.get_inbox_access_token()
     for attempt in range(2):
         data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -324,12 +397,24 @@ def _plain_parts(payload: dict) -> list[str]:
 
 def _bounded_body(payload: dict) -> str:
     text = "\n".join(_plain_parts(payload)).replace("\x00", "")
+    lines = text.splitlines()
     kept = []
-    for line in text.splitlines():
+    for index, line in enumerate(lines):
         stripped = line.strip()
         lowered = stripped.lower()
+        lookahead = {
+            candidate.strip().lower().split(":", 1)[0]
+            for candidate in lines[index:index + 6]
+            if ":" in candidate
+        }
+        standard_header_block = (
+            lowered.startswith("from:")
+            and len(lookahead & {"from", "sent", "date", "to", "subject"}) >= 3
+        )
         if (
             stripped.startswith(">")
+            or standard_header_block
+            or stripped.startswith("________________________________")
             or lowered in (
                 "-----original message-----",
                 "begin forwarded message:",
@@ -353,7 +438,11 @@ def _headers(payload: dict) -> dict[str, str]:
     }
 
 
-def _parse_message(payload: dict) -> tuple[InboundCommand | None, str | None]:
+def _parse_message(
+    payload: dict,
+    *,
+    allow_followup: bool = False,
+) -> tuple[InboundCommand | None, str | None]:
     message_id = str(payload.get("id", ""))
     thread_id = payload.get("threadId")
     body = payload.get("payload") or {}
@@ -381,14 +470,22 @@ def _parse_message(payload: dict) -> tuple[InboundCommand | None, str | None]:
     subject = headers.get("subject", "").strip()
     prefix = config.GMAIL_INBOX_SUBJECT_PREFIX
     bare_prefix = prefix.rstrip(":").rstrip()
-    if not prefix or (
-        subject != bare_prefix
-        and not subject.startswith(prefix)
-    ):
+    is_command = bool(
+        prefix
+        and (
+            subject == bare_prefix
+            or subject.startswith(prefix)
+        )
+    )
+    is_followup = bool(
+        allow_followup
+        and subject.lower().startswith("re:")
+    )
+    if not is_command and not is_followup:
         return None, "subject prefix did not match exactly"
     subject_question = (
         ""
-        if subject == bare_prefix
+        if subject == bare_prefix or is_followup
         else subject[len(prefix):].strip()
     )
     body_question = _bounded_body(body)
@@ -404,13 +501,16 @@ def _parse_message(payload: dict) -> tuple[InboundCommand | None, str | None]:
         references=headers.get("references") or None,
         subject=subject,
         question=question,
+        followup=is_followup,
     ), None
 
 
 def _list_message_ids() -> list[dict]:
+    bare_prefix = config.GMAIL_INBOX_SUBJECT_PREFIX.rstrip(":").rstrip()
+    query_subject = bare_prefix.replace("\\", "\\\\").replace('"', '\\"')
     query = (
         f'in:sent from:me to:me newer_than:{config.GMAIL_INBOX_LOOKBACK_DAYS}d '
-        f'subject:"{config.GMAIL_INBOX_SUBJECT_PREFIX}"'
+        f'subject:"{query_subject}"'
     )
     payload = _api_json(
         "messages",
@@ -427,6 +527,44 @@ def _get_message(message_id: str) -> dict:
         f"messages/{urllib.parse.quote(message_id, safe='')}",
         query={"format": "full"},
     )
+
+
+def _get_thread_metadata(thread_id: str) -> dict:
+    return _api_json(
+        f"threads/{urllib.parse.quote(thread_id, safe='')}",
+        query={
+            "format": "metadata",
+            "metadataHeaders": [
+                "In-Reply-To",
+                "X-FitLit-Notification",
+            ],
+        },
+    )
+
+
+def _reconcile_thread_deliveries(
+    thread_id: str,
+    pending: list[dict],
+    store: InboxStore,
+) -> None:
+    expected = {
+        str(row["rfc_message_id"]): str(row["message_id"])
+        for row in pending
+        if row.get("rfc_message_id")
+    }
+    if not expected:
+        return
+    thread = _get_thread_metadata(thread_id)
+    for value in thread.get("messages") or []:
+        if "SENT" not in (value.get("labelIds") or []):
+            continue
+        headers = _headers(value.get("payload") or {})
+        if headers.get("x-fitlit-notification") != "email-assistant":
+            continue
+        source_id = expected.get(headers.get("in-reply-to", ""))
+        reply_id = str(value.get("id") or "")
+        if source_id and reply_id:
+            store.reconcile_delivery(source_id, reply_id)
 
 
 def process(
@@ -486,9 +624,26 @@ def process(
             result["failed"].append({"message_id": message_id, "error": str(exc)})
             result["transient_failure"] = True
             continue
+        thread_id = str(payload.get("threadId") or "")
         try:
-            command, reason = _parse_message(payload)
-        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            pending = store.pending_deliveries(thread_id)
+            if pending:
+                _reconcile_thread_deliveries(thread_id, pending, store)
+            trusted_thread, prior_intent = store.thread_context(thread_id)
+            persisted_intent = store.message_intent(message_id)
+            command, reason = _parse_message(
+                payload,
+                allow_followup=trusted_thread,
+            )
+        except (GmailInboxError, gmail_auth.GmailAuthError) as exc:
+            result["failed"].append({"message_id": message_id, "error": str(exc)})
+            result["transient_failure"] = True
+            continue
+        except (AttributeError, KeyError, TypeError, ValueError, sqlite3.Error) as exc:
+            if isinstance(exc, sqlite3.Error):
+                result["status"] = "ledger-error"
+                result["failed"].append(str(exc))
+                return result
             result["failed"].append({
                 "message_id": message_id,
                 "error": f"malformed Gmail message: {exc}",
@@ -511,10 +666,15 @@ def process(
             continue
         if dry_run:
             try:
+                selected_intent = persisted_intent or email_assistant.classify(
+                    command.question,
+                    prior_intent=prior_intent if command.followup else None,
+                )
                 rendered = email_assistant.answer(
                     command.question,
                     now=local,
                     include_ai=False,
+                    prior_intent=selected_intent,
                 )
             except (
                 AttributeError,
@@ -532,11 +692,23 @@ def process(
             result["preview"].append({
                 "message_id": command.message_id,
                 "intent": rendered.intent,
-                "subject": f"Re: {command.subject}",
+                "subject": (
+                    command.subject
+                    if command.subject.lower().startswith("re:")
+                    else f"Re: {command.subject}"
+                ),
             })
             continue
         try:
-            reserved = store.reserve(command, local)
+            selected_intent = persisted_intent or email_assistant.classify(
+                command.question,
+                prior_intent=prior_intent if command.followup else None,
+            )
+            reserved = store.reserve(
+                command,
+                local,
+                intent=selected_intent,
+            )
         except sqlite3.Error as exc:
             result["status"] = "ledger-error"
             result["failed"].append(str(exc))
@@ -545,7 +717,11 @@ def process(
             result["skipped"].append(command.message_id)
             continue
         try:
-            rendered = email_assistant.answer(command.question, now=local)
+            rendered = email_assistant.answer(
+                command.question,
+                now=local,
+                prior_intent=selected_intent,
+            )
         except (
             AttributeError,
             KeyError,
@@ -565,8 +741,13 @@ def process(
             value for value in (command.references, command.rfc_message_id) if value
         ) or None
         try:
+            reply_subject = (
+                command.subject
+                if command.subject.lower().startswith("re:")
+                else f"Re: {command.subject}"
+            )
             reply_id = gmail_client.send(
-                f"Re: {command.subject}",
+                reply_subject,
                 rendered.text,
                 rendered.html,
                 thread_id=command.thread_id,
@@ -587,7 +768,11 @@ def process(
                 store.finish(command.message_id, error=str(exc))
             result["failed"].append({"message_id": command.message_id, "error": str(exc)})
             continue
-        store.finish(command.message_id, reply_id=reply_id)
+        store.finish(
+            command.message_id,
+            reply_id=reply_id,
+            intent=rendered.intent,
+        )
         result["sent"].append({
             "message_id": command.message_id,
             "reply_id": reply_id,
