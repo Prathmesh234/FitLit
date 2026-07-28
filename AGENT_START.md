@@ -96,11 +96,10 @@ Set `FITLIT_GMAIL_INBOX_ENABLED=true` only after confirming that
 attachments, stores no question body, and exposes read-only health summaries.
 The existing 15-minute Gmail timer handles polling; no additional daemon or
 public endpoint is required. For near-real-time delivery without more cloud
-permissions, set `FITLIT_GMAIL_INBOX_POLL_SECONDS=10` and enable
-`fitlit-gmail-poll.service` through the installer. Pub/Sub is an optional
-alternative documented in [`docs/GMAIL_PUSH.md`](docs/GMAIL_PUSH.md). Prefer
-Azure-to-Google Workload Identity Federation over a service-account key when
-using it. Keep the timer enabled as reconciliation.
+permissions, set `FITLIT_GMAIL_INBOX_POLL_SECONDS=5` and enable
+`fitlit-gmail-poll.service` through the installer. This is a Gmail-only systemd
+polling loop; do not provision Pub/Sub, a service account, or a public webhook.
+Keep the 15-minute timer enabled as reconciliation.
 
 ## 5. Configure optional headless AI
 
@@ -148,6 +147,7 @@ Installed runtime:
 |---|---|
 | `fitlit.service` | Local dashboard/API plus 10-second scheduler |
 | `fitlit-gc.service` | Lossless archive and bounded SQLite retention |
+| `fitlit-gmail-poll.service` | Checks self-addressed Gmail commands every 5 seconds |
 | `fitlit-gmail.timer` | Launches the Gmail one-shot every 15 minutes |
 | `fitlit-gmail.service` | Detects, reserves, optionally enriches, and sends |
 
