@@ -147,12 +147,15 @@ observability, and manual triggers.
 | POST | `/fetchers/{name}/run` | Fetch one fetcher right now, return a summary |
 
 ```bash
-uv run uvicorn fitlit.server:app --host 0.0.0.0 --port 8000
+uv run uvicorn fitlit.server:app --host 127.0.0.1 --port 8000
 # interactive docs at http://localhost:8000/docs
 ```
 
 `FITLIT_RUN_SCHEDULER=false` runs the API without the background scheduler (e.g.
 if you prefer to run the orchestrator as a separate process/replica).
+The API contains private health data and write endpoints and has no application
+login layer. Keep it loopback-only or place it behind an identity-aware proxy;
+never expose port 8000 directly to the internet.
 
 ### Gmail health notifications
 
@@ -194,7 +197,7 @@ without storing the email body. Unrelated reply threads are not accepted.
 
 ```bash
 docker build -t fitlit .
-docker run -p 8000:8000 -e GOOGLE_HEALTH_ACCESS_TOKEN=... \
+docker run -p 127.0.0.1:8000:8000 -e GOOGLE_HEALTH_ACCESS_TOKEN=... \
   -v "$PWD/data:/app/data" fitlit
 ```
 
@@ -203,6 +206,9 @@ The image runs as a non-root user, respects `PORT` (default 8000), and its
 under `FITLIT_DATA_DIR` (default `/app/data`) — **mount a volume there to keep it
 across restarts**, because the container filesystem is ephemeral. The endpoint
 catalogue ships inside the image and is independent of that path.
+The Docker build uses a deny-all context allowlist and explicit `COPY`
+instructions, so `.env`, Gmail state, databases, archives, and local coaching
+documents cannot be included in the image.
 
 ### Deploy to Azure Container Registry + Container Apps
 
@@ -233,12 +239,17 @@ az containerapp create -g <rg> -n fitlit \
   --environment fitlit-env \
   --image <registry>.azurecr.io/fitlit:latest \
   --registry-server <registry>.azurecr.io \
-  --target-port 8000 --ingress external \
+  --target-port 8000 --ingress internal \
   --min-replicas 1 --max-replicas 1 \
   --secrets ghtoken=<google-health-access-token> \
   --env-vars GOOGLE_HEALTH_ACCESS_TOKEN=secretref:ghtoken FITLIT_DATA_DIR=/app/data
 # then attach the storage as a volume mounted at /app/data (via `az containerapp update --yaml`).
 ```
+
+Keep Container Apps ingress `internal` unless an identity-aware authentication
+layer is configured in front of FitLit. The API itself intentionally assumes a
+private loopback or private-network deployment and must not receive anonymous
+internet traffic.
 
 Two things that matter for correctness:
 
