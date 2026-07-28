@@ -19,6 +19,7 @@ User=__FITLIT_USER__
 WorkingDirectory=__FITLIT_ROOT__
 EnvironmentFile=-__FITLIT_ROOT__/.env
 Environment="PATH=__FITLIT_PATH__"
+UMask=0077
 
 # Keep 7 days of raw rows hot; consolidate older data into the gzip archive.
 Environment=FITLIT_GC_INTERVAL_SECONDS=21600
