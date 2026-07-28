@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from fitlit import ai_insights, gmail_auth, gmail_client
@@ -198,6 +199,31 @@ class GmailPolicyTests(unittest.TestCase):
             result = dispatch([item], self.store, self.now, sender=sender)
         self.assertEqual(1, len(result["sent"]))
         self.assertNotIn("AI observations", sent_bodies[0])
+
+    def test_inbox_failure_does_not_suppress_proactive_dispatch(self) -> None:
+        store = MagicMock()
+        store.sent_today.return_value = 0
+        with (
+            patch("fitlit.gmail_service.NotificationStore", return_value=store),
+            patch("fitlit.gmail_service.build_candidates", return_value=[]),
+            patch("fitlit.gmail_service.gmail_auth.is_configured", return_value=True),
+            patch("fitlit.gmail_service.gmail_auth.get_access_token", return_value="token"),
+            patch(
+                "fitlit.gmail_service.gmail_inbox.process",
+                side_effect=sqlite3.DatabaseError("corrupt inbox ledger"),
+            ),
+            patch(
+                "fitlit.gmail_service.dispatch",
+                return_value={"sent": [], "skipped": [], "failed": [], "preview": []},
+            ) as dispatch_call,
+            patch("fitlit.config.GMAIL_SERVICE_LOCK", Path(self.temp.name) / "lock"),
+        ):
+            result = __import__(
+                "fitlit.gmail_service",
+                fromlist=["run_once"],
+            ).run_once(now=self.now)
+        self.assertEqual("error", result["inbox"]["status"])
+        dispatch_call.assert_called_once()
 
 
 class AIInsightTests(unittest.TestCase):
