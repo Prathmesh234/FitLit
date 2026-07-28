@@ -21,6 +21,11 @@ UNIT_NAMES = (
     "fitlit-gmail.timer",
 )
 LEGACY_UNIT_NAMES = ("fitlit-gmail-push.service",)
+PRIVATE_PATHS = (
+    ROOT / ".env",
+    ROOT / "AGENTS.md",
+    ROOT / "data",
+)
 
 
 def _service_user() -> tuple[str, Path]:
@@ -52,6 +57,26 @@ def _env_enabled(name: str) -> bool:
                     value = candidate.strip().strip('"').strip("'")
                     break
     return str(value or "").lower() in ("1", "true", "yes", "on")
+
+
+def _harden_private_path(path: Path) -> None:
+    if not path.exists():
+        return
+    if path.is_symlink():
+        raise RuntimeError(f"refusing to chmod symlinked private path: {path}")
+    if path.is_file():
+        path.chmod(0o600)
+        return
+    path.chmod(0o700)
+    for child in path.rglob("*"):
+        if child.is_symlink():
+            continue
+        child.chmod(0o700 if child.is_dir() else 0o600)
+
+
+def harden_private_paths() -> None:
+    for path in PRIVATE_PATHS:
+        _harden_private_path(path)
 
 
 def render() -> list[Path]:
@@ -94,6 +119,7 @@ def install(outputs: list[Path], *, start: bool) -> None:
         if start:
             command += " --start"
         raise RuntimeError(f"installation needs root; rerun: {command}")
+    harden_private_paths()
     for output in outputs:
         shutil.copyfile(output, Path("/etc/systemd/system") / output.name)
         os.chmod(Path("/etc/systemd/system") / output.name, 0o644)
