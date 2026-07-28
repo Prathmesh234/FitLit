@@ -14,7 +14,8 @@ ROOT = Path(__file__).resolve().parent.parent
 DEPLOY = ROOT / "deploy"
 RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
-UNIT_NAMES = (*SERVICE_NAMES, "fitlit-gmail.timer")
+PUSH_SERVICE_NAME = "fitlit-gmail-push.service"
+UNIT_NAMES = (*SERVICE_NAMES, PUSH_SERVICE_NAME, "fitlit-gmail.timer")
 
 
 def _service_user() -> tuple[str, Path]:
@@ -33,6 +34,19 @@ def _find_uv(home: Path) -> Path:
         if candidate.is_file() and os.access(candidate, os.X_OK):
             return candidate.resolve()
     raise RuntimeError("uv was not found; install it before installing services")
+
+
+def _push_enabled() -> bool:
+    value = os.environ.get("FITLIT_GMAIL_PUSH_ENABLED")
+    if value is None:
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            for raw in env_path.read_text().splitlines():
+                key, separator, candidate = raw.partition("=")
+                if separator and key.strip() == "FITLIT_GMAIL_PUSH_ENABLED":
+                    value = candidate.strip().strip('"').strip("'")
+                    break
+    return str(value or "").lower() in ("1", "true", "yes", "on")
 
 
 def render() -> list[Path]:
@@ -80,14 +94,24 @@ def install(outputs: list[Path], *, start: bool) -> None:
         os.chmod(Path("/etc/systemd/system") / output.name, 0o644)
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     if start:
+        enabled_units = [
+            "fitlit.service",
+            "fitlit-gc.service",
+            "fitlit-gmail.timer",
+        ]
+        if _push_enabled():
+            enabled_units.append(PUSH_SERVICE_NAME)
+        else:
+            subprocess.run(
+                ["systemctl", "disable", "--now", PUSH_SERVICE_NAME],
+                check=True,
+            )
         subprocess.run(
-            ["systemctl", "enable", "--now", "fitlit.service", "fitlit-gc.service",
-             "fitlit-gmail.timer"],
+            ["systemctl", "enable", "--now", *enabled_units],
             check=True,
         )
         subprocess.run(
-            ["systemctl", "restart", "fitlit.service", "fitlit-gc.service",
-             "fitlit-gmail.timer"],
+            ["systemctl", "restart", *enabled_units],
             check=True,
         )
 
