@@ -175,6 +175,12 @@ small validated observation block after deterministic reservation. AI never
 decides whether to send, receives only allowlisted metrics, and fails back to
 the original report. See the Gmail service document and [`AGENT_START.md`](AGENT_START.md).
 
+An optional read-only email command channel lets the configured user send
+`FitLit Ask:` questions to the same Gmail address and receive a threaded answer
+about sleep, workouts, activity, daily status, or the current week. It uses a
+separate `gmail.readonly` token, accepts only exact self-addressed commands,
+stores no question bodies, and cannot execute shell or write operations.
+
 ### Container
 
 ```bash
