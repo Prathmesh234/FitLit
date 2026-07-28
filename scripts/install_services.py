@@ -14,14 +14,13 @@ ROOT = Path(__file__).resolve().parent.parent
 DEPLOY = ROOT / "deploy"
 RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
-PUSH_SERVICE_NAME = "fitlit-gmail-push.service"
 POLL_SERVICE_NAME = "fitlit-gmail-poll.service"
 UNIT_NAMES = (
     *SERVICE_NAMES,
-    PUSH_SERVICE_NAME,
     POLL_SERVICE_NAME,
     "fitlit-gmail.timer",
 )
+LEGACY_UNIT_NAMES = ("fitlit-gmail-push.service",)
 
 
 def _service_user() -> tuple[str, Path]:
@@ -98,6 +97,21 @@ def install(outputs: list[Path], *, start: bool) -> None:
     for output in outputs:
         shutil.copyfile(output, Path("/etc/systemd/system") / output.name)
         os.chmod(Path("/etc/systemd/system") / output.name, 0o644)
+    for name in LEGACY_UNIT_NAMES:
+        load_state = subprocess.run(
+            ["systemctl", "show", name, "--property=LoadState", "--value"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        if load_state.stdout.strip() != "not-found":
+            subprocess.run(
+                ["systemctl", "disable", "--now", name],
+                check=True,
+            )
+        legacy = Path("/etc/systemd/system") / name
+        if legacy.exists():
+            legacy.unlink()
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     if start:
         enabled_units = [
@@ -110,13 +124,6 @@ def install(outputs: list[Path], *, start: bool) -> None:
         else:
             subprocess.run(
                 ["systemctl", "disable", "--now", POLL_SERVICE_NAME],
-                check=True,
-            )
-        if _env_enabled("FITLIT_GMAIL_PUSH_ENABLED"):
-            enabled_units.append(PUSH_SERVICE_NAME)
-        else:
-            subprocess.run(
-                ["systemctl", "disable", "--now", PUSH_SERVICE_NAME],
                 check=True,
             )
         subprocess.run(
