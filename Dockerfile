@@ -14,8 +14,12 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
-# Then the source, and finish the install.
-COPY . .
+# Copy only immutable application inputs. Never copy the working tree: it may
+# contain local OAuth state, Gmail ledgers, health databases, or archives.
+COPY README.md ./
+COPY fitlit ./fitlit
+COPY static ./static
+COPY data/fitbit_endpoints.yaml ./data/fitbit_endpoints.yaml
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH" \
