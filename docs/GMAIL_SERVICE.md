@@ -76,6 +76,11 @@ uv run python -m fitlit.gmail_service status
 uv run python -m fitlit.gmail_service run --dry-run
 ```
 
+For responses within seconds instead of the reconciliation timer's 15-minute
+interval, enable the outbound Pub/Sub pull listener described in
+[`GMAIL_PUSH.md`](GMAIL_PUSH.md). It requires no public VM endpoint, renews the
+Gmail watch daily, and leaves the timer active as a missed-event fallback.
+
 ## Daily health reports
 
 The morning report selects the longest sleep opportunity ending on the current
