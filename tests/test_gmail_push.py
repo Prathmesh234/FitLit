@@ -132,7 +132,7 @@ class GmailPushMessageTests(unittest.TestCase):
         malformed = MagicMock()
         malformed.data = b"not-json"
         wrong = self.message({
-            "emailAddress": "other@example.com",
+            "emailAddress": "you@example.com",
             "historyId": "125",
         })
         with patch("fitlit.config.GMAIL_TO", "person@example.com"):
@@ -165,7 +165,7 @@ class GmailPushConfigurationTests(unittest.TestCase):
     def test_installer_stops_listener_when_push_is_disabled(self) -> None:
         with (
             patch("scripts.install_services.os.geteuid", return_value=0),
-            patch("scripts.install_services._push_enabled", return_value=False),
+            patch("scripts.install_services._env_enabled", return_value=False),
             patch("scripts.install_services.subprocess.run") as run,
         ):
             install_services.install([], start=True)
