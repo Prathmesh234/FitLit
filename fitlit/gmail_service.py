@@ -19,6 +19,7 @@ from fitlit import (
     daily_digest,
     gmail_auth,
     gmail_client,
+    gmail_inbox,
     insights,
     weekly_catalog,
 )
@@ -695,9 +696,19 @@ def run_once(*, now: datetime | None = None, dry_run: bool = False) -> dict:
                     "error": str(exc),
                     "sent_today": store.sent_today(now.date().isoformat()),
                 }
+        try:
+            inbox_result = gmail_inbox.process(now, dry_run=dry_run)
+        except (OSError, sqlite3.Error, gmail_inbox.GmailInboxError) as exc:
+            inbox_result = {
+                "status": "error",
+                "failed": [str(exc)],
+                "sent": [],
+                "preview": [],
+            }
         return {
             "status": "dry-run" if dry_run else "ok",
             **dispatch(candidates, store, now, dry_run=dry_run),
+            "inbox": inbox_result,
             "sent_today": store.sent_today(now.date().isoformat()),
             "daily_min": config.GMAIL_DAILY_MIN,
             "daily_max": config.GMAIL_DAILY_MAX,
@@ -730,6 +741,7 @@ def status() -> dict:
             "hour_pacific": config.GMAIL_WEEKLY_REPORT_HOUR,
             "monday_retry_until": config.GMAIL_WEEKLY_RETRY_UNTIL_HOUR,
         },
+        "inbox": gmail_inbox.status(),
         "recent": store.recent(),
     }
 
@@ -807,6 +819,10 @@ def main(argv: list[str] | None = None) -> int:
         help="write the rendered HTML to this path",
     )
     subparsers.add_parser("consent-url", help="print the gmail.send OAuth consent URL")
+    subparsers.add_parser(
+        "inbox-consent-url",
+        help="print the isolated gmail.readonly OAuth consent URL",
+    )
     args = parser.parse_args(argv)
 
     if args.command == "run":
@@ -830,6 +846,12 @@ def main(argv: list[str] | None = None) -> int:
             print("Google OAuth client credentials are not configured.", file=sys.stderr)
             return 1
         print(gmail_auth.build_consent_url())
+        return 0
+    if args.command == "inbox-consent-url":
+        if not (config.OAUTH_CLIENT_ID and config.OAUTH_CLIENT_SECRET):
+            print("Google OAuth client credentials are not configured.", file=sys.stderr)
+            return 1
+        print(gmail_auth.build_consent_url(scope=config.GMAIL_READ_SCOPE))
         return 0
     return 1
 
