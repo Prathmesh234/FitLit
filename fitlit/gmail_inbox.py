@@ -9,7 +9,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.utils import getaddresses, parseaddr
 from pathlib import Path
 
@@ -47,7 +47,8 @@ class InboxStore:
                     created_at TEXT NOT NULL,
                     processed_at TEXT,
                     reply_id TEXT,
-                    error TEXT
+                    error TEXT,
+                    retry_after TEXT
                 );
                 CREATE TABLE IF NOT EXISTS inbound_attempts (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -64,6 +65,16 @@ class InboxStore:
                 CREATE INDEX IF NOT EXISTS idx_inbound_message_attempt
                 ON inbound_attempts(message_id, id);
             """)
+            columns = {
+                row[1]
+                for row in connection.execute(
+                    "PRAGMA table_info(inbound_messages)"
+                )
+            }
+            if "retry_after" not in columns:
+                connection.execute(
+                    "ALTER TABLE inbound_messages ADD COLUMN retry_after TEXT"
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path, timeout=10)
@@ -73,10 +84,20 @@ class InboxStore:
     def has(self, message_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
-                "SELECT status FROM inbound_messages WHERE message_id=?",
+                "SELECT status,retry_after FROM inbound_messages WHERE message_id=?",
                 (message_id,),
             ).fetchone()
-        return bool(row and row["status"] != "retryable")
+        if not row:
+            return False
+        if row["status"] != "retryable":
+            return True
+        retry_after = row["retry_after"]
+        if not retry_after:
+            return False
+        try:
+            return datetime.now(timezone.utc) < datetime.fromisoformat(retry_after)
+        except ValueError:
+            return False
 
     def attempted_today(self, day: str) -> int:
         with self._connect() as connection:
@@ -104,7 +125,8 @@ class InboxStore:
             timestamp = now.astimezone(timezone.utc).isoformat()
             if existing:
                 connection.execute(
-                    "UPDATE inbound_messages SET pacific_date=?,status='sending',error=NULL "
+                    "UPDATE inbound_messages SET pacific_date=?,status='sending',"
+                    "error=NULL,retry_after=NULL "
                     "WHERE message_id=?",
                     (day, command.message_id),
                 )
@@ -183,16 +205,32 @@ class InboxStore:
 
     def retry(self, message_id: str, error: str) -> None:
         with self._connect() as connection:
+            attempts = connection.execute(
+                "SELECT COUNT(*) FROM inbound_attempts WHERE message_id=?",
+                (message_id,),
+            ).fetchone()[0]
+            delay = min(
+                3600,
+                config.GMAIL_INBOX_RETRY_BASE_SECONDS
+                * (2 ** min(max(0, attempts - 1), 7)),
+            )
+            now = datetime.now(timezone.utc)
             connection.execute(
-                "UPDATE inbound_messages SET status='retryable',processed_at=?,error=? "
+                "UPDATE inbound_messages SET status='retryable',processed_at=?,"
+                "error=?,retry_after=? "
                 "WHERE message_id=? AND status='sending'",
-                (datetime.now(timezone.utc).isoformat(), error, message_id),
+                (
+                    now.isoformat(),
+                    error,
+                    (now + timedelta(seconds=delay)).isoformat(),
+                    message_id,
+                ),
             )
             connection.execute(
                 "UPDATE inbound_attempts SET status='retryable',finished_at=?,error=? "
                 "WHERE id=(SELECT MAX(id) FROM inbound_attempts WHERE message_id=?)",
                 (
-                    datetime.now(timezone.utc).isoformat(),
+                    now.isoformat(),
                     error,
                     message_id,
                 ),
