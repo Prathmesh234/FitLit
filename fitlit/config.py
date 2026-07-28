@@ -116,11 +116,15 @@ OAUTH_REFRESH_LEEWAY_SECONDS = int(_env("GOOGLE_OAUTH_REFRESH_LEEWAY", "60"))
 # --------------------------------------------------------------------------- #
 GMAIL_API_BASE = _env("FITLIT_GMAIL_API_BASE", "https://gmail.googleapis.com/gmail/v1")
 GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send"
+GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_REFRESH_TOKEN = os.environ.get("GMAIL_REFRESH_TOKEN", "")
+GMAIL_INBOX_REFRESH_TOKEN = os.environ.get("GMAIL_INBOX_REFRESH_TOKEN", "")
 GMAIL_TO = os.environ.get("FITLIT_GMAIL_TO", "")
 GMAIL_FROM_NAME = _env("FITLIT_GMAIL_FROM_NAME", "FitLit")
 GMAIL_TOKEN_STATE = STATE_DIR / "gmail-token.json"
+GMAIL_INBOX_TOKEN_STATE = STATE_DIR / "gmail-inbox-token.json"
 GMAIL_NOTIFICATION_DB = STATE_DIR / "gmail-notifications.db"
+GMAIL_INBOX_DB = STATE_DIR / "gmail-inbox.db"
 GMAIL_SERVICE_LOCK = STATE_DIR / "gmail-service.lock"
 GMAIL_DAILY_MIN = 2
 GMAIL_DAILY_MAX = 5
@@ -129,6 +133,18 @@ GMAIL_EVENING_FILL_HOUR = int(_env("FITLIT_GMAIL_EVENING_FILL_HOUR", "20"))
 GMAIL_WEEKLY_REPORT_HOUR = int(_env("FITLIT_GMAIL_WEEKLY_REPORT_HOUR", "20"))
 GMAIL_WEEKLY_RETRY_UNTIL_HOUR = int(
     _env("FITLIT_GMAIL_WEEKLY_RETRY_UNTIL_HOUR", "12")
+)
+GMAIL_INBOX_ENABLED = _env_bool("FITLIT_GMAIL_INBOX_ENABLED")
+GMAIL_INBOX_SUBJECT_PREFIX = _env("FITLIT_GMAIL_INBOX_SUBJECT_PREFIX", "FitLit Ask:")
+GMAIL_INBOX_DAILY_MAX = max(1, int(_env("FITLIT_GMAIL_INBOX_DAILY_MAX", "20")))
+GMAIL_INBOX_BATCH_MAX = max(1, min(20, int(_env("FITLIT_GMAIL_INBOX_BATCH_MAX", "5"))))
+GMAIL_INBOX_LOOKBACK_DAYS = max(
+    1,
+    min(30, int(_env("FITLIT_GMAIL_INBOX_LOOKBACK_DAYS", "7"))),
+)
+GMAIL_INBOX_BODY_MAX_CHARS = max(
+    100,
+    min(10_000, int(_env("FITLIT_GMAIL_INBOX_BODY_MAX_CHARS", "2000"))),
 )
 
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
