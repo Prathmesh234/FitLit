@@ -1,10 +1,17 @@
-.git
-.venv
-__pycache__
-*.pyc
-.env
-data/raw
-data/state
-.idea
-.vscode
-.DS_Store
+# Deny the entire working tree by default. The explicit allowlist below is the
+# complete production image input, so local health data and secrets cannot enter
+# the build context even when a new private path is added outside .gitignore.
+**
+
+!/.dockerignore
+!/Dockerfile
+!/README.md
+!/pyproject.toml
+!/uv.lock
+
+!/fitlit/
+!/fitlit/**
+!/static/
+!/static/**
+!/data/
+!/data/fitbit_endpoints.yaml
