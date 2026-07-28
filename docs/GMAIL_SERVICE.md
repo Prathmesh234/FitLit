@@ -77,9 +77,28 @@ uv run python -m fitlit.gmail_service run --dry-run
 ```
 
 For responses within seconds instead of the reconciliation timer's 15-minute
-interval, enable the outbound Pub/Sub pull listener described in
-[`GMAIL_PUSH.md`](GMAIL_PUSH.md). It requires no public VM endpoint, renews the
-Gmail watch daily, and leaves the timer active as a missed-event fallback.
+interval, the simplest private setup is the Gmail-only listener:
+
+```ini
+FITLIT_GMAIL_INBOX_ENABLED=true
+FITLIT_GMAIL_INBOX_POLL_SECONDS=10
+```
+
+```bash
+sudo uv run python scripts/install_services.py --install --start
+systemctl status fitlit-gmail-poll.service --no-pager
+```
+
+It uses only the existing `gmail.readonly` and `gmail.send` OAuth credentials,
+checks Gmail every 10 seconds, and requires no Google Cloud project resources,
+service account, public endpoint, or extra cloud authorization. Typical command
+detection is within one polling interval; answer generation and Gmail delivery
+add additional processing time. The 15-minute timer stays enabled as a
+reconciliation path.
+
+Google Pub/Sub remains an optional event-driven alternative described in
+[`GMAIL_PUSH.md`](GMAIL_PUSH.md). It avoids repeated Gmail list calls but
+requires Google Cloud topic, subscription, and runtime identity setup.
 
 ## Daily health reports
 
