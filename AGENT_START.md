@@ -84,6 +84,19 @@ duplicates, and reserves the final slot for mandatory reporting. The morning
 sleep brief is keyed to the immutable sleep record; the 8 PM Pacific
 day-in-review is keyed to the Pacific calendar date.
 
+For the optional self-addressed command inbox, mint a separate read-only token:
+
+```bash
+uv run python scripts/oauth_capture.py --gmail-inbox
+```
+
+Set `FITLIT_GMAIL_INBOX_ENABLED=true` only after confirming that
+`FITLIT_GMAIL_TO` is the operator's own address. The reader accepts only exact
+`FitLit Ask:` subjects sent from and to that address, ignores HTML and
+attachments, stores no question body, and exposes read-only health summaries.
+The existing 15-minute Gmail timer handles polling; no additional daemon or
+public endpoint is required.
+
 ## 5. Configure optional headless AI
 
 AI enrichment is off by default. Install and authenticate at least one supported
