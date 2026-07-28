@@ -49,6 +49,15 @@ the same Gmail thread. The email text itself is never supplied to Copilot,
 Codex, or Claude. If optional AI observations are enabled, a provider receives
 only the same shallow allowlisted numerical object used by proactive reports.
 
+Replies inside a successfully processed FitLit thread are accepted as follow-up
+questions even though Gmail changes the subject to `Re: FitLit Ask`. FitLit
+preserves the subject and thread headers in every response. For short ambiguous
+follow-ups such as “What about today?”, it reuses the prior classified health
+intent. The ledger stores only that intent and immutable message/thread IDs; it
+does not retain question bodies or prior email content. Replies in unrelated
+threads remain rejected, and FitLit-generated messages are never interpreted as
+new commands.
+
 Commands are read-only: they cannot execute shell commands, alter FitLit data,
 control services, or access arbitrary files. Immutable Gmail message IDs are
 stored in `data/state/gmail-inbox.db` without retaining the question body.
@@ -81,7 +90,7 @@ interval, the simplest private setup is the Gmail-only listener:
 
 ```ini
 FITLIT_GMAIL_INBOX_ENABLED=true
-FITLIT_GMAIL_INBOX_POLL_SECONDS=10
+FITLIT_GMAIL_INBOX_POLL_SECONDS=5
 ```
 
 ```bash
@@ -89,16 +98,13 @@ sudo uv run python scripts/install_services.py --install --start
 systemctl status fitlit-gmail-poll.service --no-pager
 ```
 
-It uses only the existing `gmail.readonly` and `gmail.send` OAuth credentials,
-checks Gmail every 10 seconds, and requires no Google Cloud project resources,
-service account, public endpoint, or extra cloud authorization. Typical command
-detection is within one polling interval; answer generation and Gmail delivery
-add additional processing time. The 15-minute timer stays enabled as a
-reconciliation path.
-
-Google Pub/Sub remains an optional event-driven alternative described in
-[`GMAIL_PUSH.md`](GMAIL_PUSH.md). It avoids repeated Gmail list calls but
-requires Google Cloud topic, subscription, and runtime identity setup.
+It uses only the existing `gmail.readonly` and `gmail.send` OAuth credentials
+and checks Gmail every 5 seconds. This is a long-running systemd polling loop,
+not a public webhook or Google Pub/Sub integration. It requires no Pub/Sub
+topic, service account, public endpoint, or additional cloud authorization.
+Typical command detection is within one polling interval; answer generation and
+Gmail delivery add additional processing time. The 15-minute timer stays
+enabled as a reconciliation path.
 
 ## Daily health reports
 
