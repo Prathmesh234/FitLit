@@ -83,21 +83,38 @@ def _update_env(key: str, refresh_token: str) -> None:
 def main(argv: list[str] | None = None) -> int:
     global _expected_state
     parser = argparse.ArgumentParser(description="Capture a Google OAuth refresh token")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--gmail",
         action="store_true",
         help="request gmail.send only and save GMAIL_REFRESH_TOKEN",
+    )
+    group.add_argument(
+        "--gmail-inbox",
+        action="store_true",
+        help="request gmail.readonly only and save GMAIL_INBOX_REFRESH_TOKEN",
     )
     args = parser.parse_args(argv)
     if not (config.OAUTH_CLIENT_ID and config.OAUTH_CLIENT_SECRET):
         print("Set GOOGLE_HEALTH_CLIENT_ID and GOOGLE_HEALTH_CLIENT_SECRET in .env first.")
         return 1
     _expected_state = secrets.token_urlsafe(32)
-    consent_url = (
-        gmail_auth.build_consent_url(_expected_state)
-        if args.gmail else auth._build_consent_url(_expected_state)
-    )
-    env_key = "GMAIL_REFRESH_TOKEN" if args.gmail else "GOOGLE_HEALTH_REFRESH_TOKEN"
+    gmail_mode = args.gmail or args.gmail_inbox
+    if args.gmail_inbox:
+        consent_url = gmail_auth.build_consent_url(
+            _expected_state,
+            scope=config.GMAIL_READ_SCOPE,
+        )
+        env_key = "GMAIL_INBOX_REFRESH_TOKEN"
+        cache_path = config.GMAIL_INBOX_TOKEN_STATE
+    elif args.gmail:
+        consent_url = gmail_auth.build_consent_url(_expected_state)
+        env_key = "GMAIL_REFRESH_TOKEN"
+        cache_path = config.GMAIL_TOKEN_STATE
+    else:
+        consent_url = auth._build_consent_url(_expected_state)
+        env_key = "GOOGLE_HEALTH_REFRESH_TOKEN"
+        cache_path = config.TOKEN_STATE
 
     print("\n1. On your LAPTOP, open this URL in a browser and approve:\n")
     print("   " + consent_url + "\n")
@@ -118,15 +135,27 @@ def main(argv: list[str] | None = None) -> int:
 
     print("\n→ got the code, exchanging for tokens ...")
     try:
-        resp = gmail_auth.exchange_code(_result["code"]) if args.gmail else auth._exchange_code(_result["code"])
+        resp = (
+            gmail_auth.exchange_code(_result["code"])
+            if gmail_mode else auth._exchange_code(_result["code"])
+        )
     except (auth.AuthError, gmail_auth.GmailAuthError) as exc:
         print(f"❌ exchange failed: {exc}")
         return 1
 
     refresh_token = resp.get("refresh_token")
     if resp.get("access_token") and "expires_in" in resp:
-        cache_writer = gmail_auth._write_cache if args.gmail else auth._write_cache
-        cache_writer(resp["access_token"], time.time() + float(resp["expires_in"]))
+        if gmail_mode:
+            gmail_auth._write_cache(
+                resp["access_token"],
+                time.time() + float(resp["expires_in"]),
+                cache_path,
+            )
+        else:
+            auth._write_cache(
+                resp["access_token"],
+                time.time() + float(resp["expires_in"]),
+            )
     if not refresh_token:
         print("❌ No refresh_token returned (already consented before?). Revoke at "
               "https://myaccount.google.com/permissions and retry.")
