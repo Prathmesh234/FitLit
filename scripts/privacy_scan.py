@@ -23,7 +23,6 @@ SAFE_EMAILS = {
     "you@gmail.com",
     "you@example.com",
     "noreply@anthropic.com",
-    "gmail-api-push@system.gserviceaccount.com",
 }
 
 
