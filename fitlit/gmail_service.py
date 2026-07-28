@@ -20,6 +20,7 @@ from fitlit import (
     gmail_auth,
     gmail_client,
     gmail_inbox,
+    gmail_push,
     insights,
     weekly_catalog,
 )
@@ -741,7 +742,10 @@ def status() -> dict:
             "hour_pacific": config.GMAIL_WEEKLY_REPORT_HOUR,
             "monday_retry_until": config.GMAIL_WEEKLY_RETRY_UNTIL_HOUR,
         },
-        "inbox": gmail_inbox.status(),
+        "inbox": {
+            **gmail_inbox.status(),
+            "push": gmail_push.status(),
+        },
         "recent": store.recent(),
     }
 
