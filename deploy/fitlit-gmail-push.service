@@ -1,0 +1,20 @@
+[Unit]
+Description=FitLit near-real-time Gmail Pub/Sub listener
+After=network-online.target fitlit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__FITLIT_USER__
+WorkingDirectory=__FITLIT_ROOT__
+EnvironmentFile=-__FITLIT_ROOT__/.env
+Environment="PATH=__FITLIT_PATH__"
+ExecStart=__UV_PATH__ run python -m fitlit.gmail_push run
+Restart=on-failure
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
