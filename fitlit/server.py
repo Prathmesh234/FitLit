@@ -9,7 +9,7 @@ One process does two things:
 
 Run it:
 
-    uv run uvicorn fitlit.server:app --host 0.0.0.0 --port 8000
+    uv run uvicorn fitlit.server:app --host 127.0.0.1 --port 8000
     # or:  uv run python -m fitlit.server
 
 Endpoints:
