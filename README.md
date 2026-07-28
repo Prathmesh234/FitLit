@@ -180,12 +180,15 @@ An optional read-only email command channel lets the configured user send
 about sleep, workouts, activity, daily status, or the current week. It uses a
 separate `gmail.readonly` token, accepts only exact self-addressed commands,
 stores no question bodies, and cannot execute shell or write operations.
-A Gmail-only daemon can check for those commands every 10 seconds using the
-already-approved Gmail OAuth credentials, with no public endpoint or Google
-Cloud resources. Google Pub/Sub remains an optional event-driven alternative.
-The 15-minute timer stays enabled as a reliability fallback. See
-[`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md) and
-[`docs/GMAIL_PUSH.md`](docs/GMAIL_PUSH.md).
+A Gmail-only daemon checks for those commands every 5 seconds using the
+already-approved Gmail OAuth credentials. It is a simple systemd polling loop:
+no public endpoint, Pub/Sub topic, service account, or additional cloud
+authorization. The 15-minute timer stays enabled as a reliability fallback.
+See [`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
+
+The assistant remains conversational within the same Gmail thread: reply to a
+FitLit answer with the next question and it preserves the prior health intent
+without storing the email body. Unrelated reply threads are not accepted.
 
 ### Container
 
