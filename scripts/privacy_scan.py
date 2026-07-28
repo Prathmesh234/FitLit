@@ -11,8 +11,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 PATTERNS = {
     "private-key": re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
-    "github-token": re.compile(r"\b(?:ghp|github_pat)_[A-Za-z0-9_]{20,}\b"),
+    "github-token": re.compile(r"\b(?:gh[pousr]|github_pat)_[A-Za-z0-9_]{20,}\b"),
     "google-api-key": re.compile(r"\bAIza[A-Za-z0-9_-]{30,}\b"),
+    "google-access-token": re.compile(r"\bya29\.[A-Za-z0-9_-]{20,}\b"),
+    "google-client-secret": re.compile(r"\bGOCSPX-[A-Za-z0-9_-]{20,}\b"),
+    "google-refresh-token": re.compile(r"\b1//[A-Za-z0-9_-]{20,}\b"),
     "oauth-code": re.compile(r"\b4/0A[A-Za-z0-9_-]{20,}\b"),
     "oauth-client-id": re.compile(r"\b\d{6,}-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com\b"),
     "absolute-home": re.compile(r"(?:/Users|/home)/[A-Za-z0-9._-]+/"),
@@ -65,22 +68,32 @@ def scan_current() -> list[str]:
     return findings
 
 
-def scan_history() -> list[str]:
-    findings = []
+def scan_history() -> tuple[list[str], list[str]]:
     identities = _git("log", "--all", "--format=%H%x09%an%x09%ae%x09%cn%x09%ce")
-    findings.extend(_scan_text("git-history-identities", identities))
     patches = _git("log", "--all", "--format=commit:%H", "--patch", "--no-ext-diff")
-    findings.extend(_scan_text("git-history-patches", patches))
-    return findings
+    return (
+        _scan_text("git-history-patches", patches),
+        _scan_text("git-history-identities", identities),
+    )
+
+
+def _print_category(name: str, findings: list[str], limit: int = 100) -> None:
+    print(f"{name}: {len(findings)} finding(s)")
+    for finding in findings[:limit]:
+        print(finding)
+    if len(findings) > limit:
+        print(f"... {len(findings) - limit} more {name} findings")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--history", action="store_true", help="also scan all reachable commits")
     args = parser.parse_args(argv)
-    findings = scan_current()
+    current_findings = scan_current()
+    history_findings: list[str] = []
+    identity_findings: list[str] = []
     if args.history:
-        findings.extend(scan_history())
+        history_findings, identity_findings = scan_history()
     protected = [
         path for path in ("AGENTS.md", "data/Body-Comp-HandOff/")
         if subprocess.run(
@@ -91,11 +104,11 @@ def main(argv: list[str] | None = None) -> int:
     ]
     print(f"scanned tracked tree{' and history' if args.history else ''}")
     print(f"protected local paths: {', '.join(protected) if protected else 'none'}")
-    for finding in findings[:100]:
-        print(finding)
-    if len(findings) > 100:
-        print(f"... {len(findings) - 100} more findings")
-    return 1 if findings else 0
+    _print_category("current-content", current_findings)
+    if args.history:
+        _print_category("history-content", history_findings)
+        _print_category("history-identities", identity_findings)
+    return 1 if current_findings or history_findings or identity_findings else 0
 
 
 if __name__ == "__main__":
