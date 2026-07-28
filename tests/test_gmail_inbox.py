@@ -239,6 +239,13 @@ class InboxStoreTests(unittest.TestCase):
         self.assertTrue(self.store.reserve(command, NOW))
         self.store.retry(command.message_id, "temporary")
         self.assertEqual(1, self.store.attempted_today("2026-07-27"))
+        self.assertTrue(self.store.has(command.message_id))
+        with self.store._connect() as connection:
+            connection.execute(
+                "UPDATE inbound_messages SET retry_after=? WHERE message_id=?",
+                ("2000-01-01T00:00:00+00:00", command.message_id),
+            )
+            connection.commit()
         self.assertTrue(self.store.reserve(command, NOW))
         self.assertEqual(2, self.store.attempted_today("2026-07-27"))
 
@@ -327,7 +334,7 @@ class InboxProcessingTests(unittest.TestCase):
         self.assertEqual("Re: FitLit Ask: How did I sleep?", send.call_args.args[0])
         send.assert_called_once()
 
-    def test_retryable_send_failure_releases_message(self) -> None:
+    def test_retryable_send_failure_schedules_backoff(self) -> None:
         with ExitStack() as stack:
             self.enter_config(stack)
             stack.enter_context(
@@ -353,7 +360,7 @@ class InboxProcessingTests(unittest.TestCase):
             )
             result = gmail_inbox.process(NOW, store=self.store)
         self.assertEqual(1, len(result["failed"]))
-        self.assertFalse(self.store.has("gmail-1"))
+        self.assertTrue(self.store.has("gmail-1"))
         self.assertEqual(1, self.store.attempted_today("2026-07-27"))
 
 
