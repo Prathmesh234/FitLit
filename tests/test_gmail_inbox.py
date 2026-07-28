@@ -34,7 +34,7 @@ def message(
         {"name": "From", "value": sender},
         {"name": "To", "value": recipient},
         {"name": "Subject", "value": subject},
-        {"name": "Message-ID", "value": f"<{message_id}@mail.example>"},
+        {"name": "Message-ID", "value": f"<{message_id}@localhost>"},
     ]
     if auto_submitted:
         headers.append({"name": "Auto-Submitted", "value": auto_submitted})
@@ -75,7 +75,7 @@ class GmailInboxParsingTests(unittest.TestCase):
 
     def test_rejects_wrong_sender_near_prefix_and_automated_mail(self) -> None:
         cases = [
-            message(sender="attacker@example.com"),
+            message(sender="you@example.com"),
             message(subject="Re: FitLit Ask: How did I sleep?"),
             message(auto_submitted="auto-generated"),
             {**message(), "labelIds": ["INBOX"]},
@@ -123,6 +123,20 @@ class GmailInboxParsingTests(unittest.TestCase):
         ):
             command, _ = gmail_inbox._parse_message(payload)
         self.assertNotIn("nested attachment", command.question)
+
+    def test_generated_reply_is_rejected_even_when_prefix_matches(self) -> None:
+        payload = message(subject="Re: previous command")
+        payload["payload"]["headers"].append({
+            "name": "X-FitLit-Notification",
+            "value": "email-assistant",
+        })
+        with (
+            patch("fitlit.config.GMAIL_TO", "person@example.com"),
+            patch("fitlit.config.GMAIL_INBOX_SUBJECT_PREFIX", "Re:"),
+        ):
+            command, reason = gmail_inbox._parse_message(payload)
+        self.assertIsNone(command)
+        self.assertEqual("FitLit-generated message rejected", reason)
 
     def test_malformed_api_json_becomes_inbox_error(self) -> None:
         response = MagicMock()
@@ -309,7 +323,7 @@ class InboxProcessingTests(unittest.TestCase):
         self.assertEqual("reply-1", first["sent"][0]["reply_id"])
         self.assertEqual([], second["sent"])
         self.assertEqual("thread-1", send.call_args.kwargs["thread_id"])
-        self.assertEqual("<gmail-1@mail.example>", send.call_args.kwargs["in_reply_to"])
+        self.assertEqual("<gmail-1@localhost>", send.call_args.kwargs["in_reply_to"])
         self.assertEqual("Re: FitLit Ask: How did I sleep?", send.call_args.args[0])
         send.assert_called_once()
 
