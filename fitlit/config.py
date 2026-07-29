@@ -158,6 +158,51 @@ GMAIL_INBOX_RETRY_BASE_SECONDS = max(
     10,
     min(600, int(_env("FITLIT_GMAIL_INBOX_RETRY_BASE_SECONDS", "30"))),
 )
+# Provider-centered inbox replies. Once the first command thread succeeds, only
+# that exact Gmail chain is polled and at most its latest five messages are
+# exposed to the isolated headless provider.
+EMAIL_AGENT_PROVIDER = _env("FITLIT_EMAIL_AGENT_PROVIDER", "copilot").lower()
+EMAIL_AGENT_CONTEXT_MESSAGES = max(
+    1,
+    min(5, int(_env("FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES", "5"))),
+)
+EMAIL_AGENT_TIMEOUT_SECONDS = max(
+    30,
+    min(600, int(_env("FITLIT_EMAIL_AGENT_TIMEOUT_SECONDS", "180"))),
+)
+EMAIL_AGENT_MAX_INPUT_BYTES = max(
+    20_000,
+    min(500_000, int(_env("FITLIT_EMAIL_AGENT_MAX_INPUT_BYTES", "100000"))),
+)
+EMAIL_AGENT_MAX_OUTPUT_CHARS = max(
+    10_000,
+    min(250_000, int(_env("FITLIT_EMAIL_AGENT_MAX_OUTPUT_CHARS", "120000"))),
+)
+EMAIL_AGENT_MAX_ARTIFACTS = max(
+    0,
+    min(2, int(_env("FITLIT_EMAIL_AGENT_MAX_ARTIFACTS", "2"))),
+)
+EMAIL_AGENT_MAX_ATTACHMENT_BYTES = max(
+    100_000,
+    min(
+        20_000_000,
+        int(_env("FITLIT_EMAIL_AGENT_MAX_ATTACHMENT_BYTES", "5000000")),
+    ),
+)
+EMAIL_AGENT_COPILOT_MODEL = _env(
+    "FITLIT_EMAIL_AGENT_COPILOT_MODEL",
+    "gpt-5.6-sol",
+)
+EMAIL_AGENT_CODEX_MODEL = _env("FITLIT_EMAIL_AGENT_CODEX_MODEL", "")
+EMAIL_AGENT_CLAUDE_MODEL = _env("FITLIT_EMAIL_AGENT_CLAUDE_MODEL", "")
+EMAIL_AGENT_REASONING_EFFORT = _env(
+    "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
+    "high",
+).lower()
+EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env(
+    "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD",
+    "0.20",
+)
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
 AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")
