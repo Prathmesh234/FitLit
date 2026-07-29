@@ -20,7 +20,9 @@ health value, diet, location, or private coaching context.
    `data/Body-Comp-HandOff/` private and untracked.
 2. Do not print token values. Report only whether required variable names exist.
 3. Keep the API on `127.0.0.1:8000`; it has no application authentication.
-4. Do not send raw database rows or free-form personal notes to an AI provider.
+4. Do not send raw database rows, unrelated mailbox mail, or private coaching
+   files to an AI provider. The command inbox may send only the latest five
+   bounded messages from its primary FitLit thread plus grounded summaries.
 5. Do not enable Gmail delivery until the recipient and daily policy are
    understood. Preview first.
 
@@ -94,17 +96,37 @@ Set `FITLIT_GMAIL_INBOX_ENABLED=true` only after confirming that
 `FITLIT_GMAIL_TO` is the operator's own address. The reader accepts only exact
 `FitLit Ask:` subjects sent from and to that address, ignores HTML and
 attachments, stores no question body, and exposes read-only health summaries.
-The existing 15-minute Gmail timer handles polling; no additional daemon or
-public endpoint is required. For near-real-time delivery without more cloud
-permissions, set `FITLIT_GMAIL_INBOX_POLL_SECONDS=5` and enable
-`fitlit-gmail-poll.service` through the installer. This is a Gmail-only systemd
-polling loop; do not provision Pub/Sub, a service account, or a public webhook.
-Keep the 15-minute timer enabled as reconciliation.
+The first successful command chain becomes the only thread polled. The selected
+headless provider receives at most the latest five messages from that chain,
+with the newest user message authoritative.
+For near-real-time delivery without more cloud permissions, set
+`FITLIT_GMAIL_INBOX_POLL_SECONDS=5` and enable `fitlit-gmail-poll.service`
+through the installer. This Gmail-only systemd polling loop is the primary
+command listener; do not provision Pub/Sub, a service account, or a public
+webhook. Keep the existing 15-minute Gmail timer enabled as reconciliation.
 
-## 5. Configure optional headless AI
+Configure the command-reply harness in `.env`:
 
-AI enrichment is off by default. Install and authenticate at least one supported
-CLI using its official instructions:
+```ini
+FITLIT_EMAIL_AGENT_PROVIDER=copilot
+FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
+FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
+```
+
+Copilot runs with an isolated temporary `COPILOT_HOME`, no remote export, no
+MCP servers, and only read access to its temporary request. It drafts
+qualitative text and safe HTML, selects scalar evidence paths, and chooses any
+requested XLSX/DOCX type. The runtime appends exact path/value traces, owns
+topics, filenames, columns, and data cells, and deletes request files, provider
+state, logs, and artifacts after delivery.
+
+## 5. Configure optional proactive-report AI
+
+The conversational inbox requires its selected provider. Separate enrichment
+for proactive morning/evening/weekly reports remains optional and is off by
+default. Install and authenticate supported CLIs using their official
+instructions:
 
 - GitHub Copilot CLI: <https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli>
 - OpenAI Codex CLI: <https://learn.chatgpt.com/docs/codex-cli>
