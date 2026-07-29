@@ -43,20 +43,44 @@ FitLit Ask: Give me this week's summary
 FitLit Ask: Show commands
 ```
 
-FitLit classifies each question locally into sleep, workout, activity, weekly,
-daily, or help. It reads only the corresponding local summaries and replies in
-the same Gmail thread. The email text itself is never supplied to Copilot,
-Codex, or Claude. If optional AI observations are enabled, a provider receives
-only the same shallow allowlisted numerical object used by proactive reports.
+The command daemon is provider-centered rather than template-driven. It builds
+a fresh, read-only grounded snapshot from FitLit's daily, sleep, weekly,
+workout, weight, and activity summaries and gives that snapshot to the selected
+headless harness. The provider drafts qualitative plain text and safe HTML,
+selects scalar evidence paths, and chooses any requested XLSX or DOCX artifact
+type. FitLit appends the exact path/value trace and materializes the attachment
+with locally owned filenames, columns, and cells.
 
-Replies inside a successfully processed FitLit thread are accepted as follow-up
-questions even though Gmail changes the subject to `Re: FitLit Ask`. FitLit
-preserves the subject and thread headers in every response. For short ambiguous
-follow-ups such as “What about today?”, it reuses the prior classified health
-intent. The ledger stores only that intent and immutable message/thread IDs; it
-does not retain question bodies or prior email content. Replies in unrelated
-threads remain rejected, and FitLit-generated messages are never interpreted as
-new commands.
+The first successfully processed `FitLit Ask` conversation becomes the primary
+thread. After that, the daemon stops searching the mailbox and polls only that
+exact Gmail thread. It reads full content for no more than the latest five
+messages in the chain, answers only the newest unseen user message, and treats
+the older four as bounded context. Older unseen questions are marked
+superseded instead of receiving stale replies. Unrelated threads never enter
+the provider request.
+
+The bounded thread fragments are supplied in-memory to the configured provider,
+so the provider can understand conversational replies. They are not written to
+the SQLite ledger. The ledger stores only immutable message/thread IDs,
+delivery state, Gmail chronology, and a topic derived from the cited data root.
+The
+isolated provider request, local session state, logs, and generated artifacts
+live in a mode-`0700` temporary directory and are deleted immediately after
+Gmail delivery or failure.
+
+Copilot is the default harness, using `gpt-5.6-sol` at `high` reasoning effort.
+Its run has an isolated `COPILOT_HOME`, no remote export, no MCP servers, no
+custom instructions, and only the `view` tool inside the temporary request
+directory. Codex and Claude adapters can be selected through `.env`. Provider
+output is schema-validated; unsafe HTML, non-scalar or missing evidence paths,
+provider-authored digits or number words, provider-controlled topics or
+filenames, excessive artifacts, XML-unsafe text, and spreadsheet formulas are
+rejected. Exact numeric values appear only in runtime-rendered path/value
+traces. There is no deterministic answer fallback: a provider failure is
+retried with durable backoff rather than sending an ungrounded reply.
+Interrupted sends are first reconciled against Gmail using the immutable source
+message ID and are released for retry only after the full provider-and-delivery
+window has expired without a matching reply.
 
 Commands are read-only: they cannot execute shell commands, alter FitLit data,
 control services, or access arbitrary files. Immutable Gmail message IDs are
@@ -72,6 +96,10 @@ FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_SUBJECT_PREFIX=FitLit Ask:
 FITLIT_GMAIL_INBOX_DAILY_MAX=20
 FITLIT_GMAIL_INBOX_BATCH_MAX=5
+FITLIT_EMAIL_AGENT_PROVIDER=copilot
+FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
+FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
 
 The feature uses a separate `gmail.readonly` refresh token and access-token
@@ -91,6 +119,9 @@ interval, the simplest private setup is the Gmail-only listener:
 ```ini
 FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_POLL_SECONDS=5
+FITLIT_EMAIL_AGENT_PROVIDER=copilot
+FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 ```
 
 ```bash
@@ -102,9 +133,9 @@ It uses only the existing `gmail.readonly` and `gmail.send` OAuth credentials
 and checks Gmail every 5 seconds. This is a long-running systemd polling loop,
 not a public webhook or Google Pub/Sub integration. It requires no Pub/Sub
 topic, service account, public endpoint, or additional cloud authorization.
-Typical command detection is within one polling interval; answer generation and
-Gmail delivery add additional processing time. The 15-minute timer stays
-enabled as a reconciliation path.
+Typical command detection is within one polling interval; headless generation,
+artifact validation, and Gmail delivery add additional processing time. The
+15-minute timer stays enabled as a reconciliation path.
 
 ## Daily health reports
 
@@ -240,19 +271,29 @@ Official references:
    ```
 
    This writes `GMAIL_INBOX_REFRESH_TOKEN`; then set
-   `FITLIT_GMAIL_INBOX_ENABLED=true`.
-6. Install and enable the timer:
+   `FITLIT_GMAIL_INBOX_ENABLED=true`. Install and authenticate the selected
+   command provider, then configure it:
+
+   ```ini
+   FITLIT_EMAIL_AGENT_PROVIDER=copilot
+   FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+   FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
+   FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
+   ```
+
+6. Install and enable the services:
 
    ```bash
    sudo uv run python scripts/install_services.py --install --start
    ```
 
-## Optional AI observations
+## Optional proactive-report AI observations
 
 The event detector, immutable IDs, overlap checks, daily cap, reserved slot,
-and delivery decision remain deterministic. AI is called only after a message has successfully reserved a ledger slot, and
-only for sleep, daily, workout, weekly, or high-signal heart reports. A normal day
-therefore makes roughly 2–5 model calls, not 96 timer-interval calls.
+and delivery decision remain deterministic. This separate enrichment path is
+called only after a proactive message has successfully reserved a ledger slot,
+and only for sleep, daily, workout, weekly, or high-signal heart reports. A
+normal day therefore makes roughly 2–5 model calls, not 96 timer-interval calls.
 
 The subprocess receives a shallow allowlisted object of numerical metrics and a
 controlled report type. It does not receive the Gmail address, OAuth tokens,
