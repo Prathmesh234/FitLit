@@ -8,4 +8,6 @@ dependencies = [
     "pyyaml>=6.0.3",
     "fastapi>=0.115",
     "uvicorn>=0.34",
+    "openpyxl>=3.1.5",
+    "python-docx>=1.2.0",
 ]
