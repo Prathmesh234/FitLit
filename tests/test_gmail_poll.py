@@ -11,11 +11,13 @@ class GmailPollTests(unittest.TestCase):
         with (
             patch("fitlit.config.GMAIL_INBOX_ENABLED", False),
             patch("fitlit.gmail_poll.gmail_auth.is_inbox_configured", return_value=False),
+            patch("fitlit.gmail_poll.shutil.which", return_value=None),
         ):
             with self.assertRaises(gmail_poll.GmailPollError) as raised:
                 gmail_poll._validate_runtime()
         self.assertIn("FITLIT_GMAIL_INBOX_ENABLED=true", str(raised.exception))
         self.assertIn("OAuth credentials", str(raised.exception))
+        self.assertIn("headless email provider", str(raised.exception))
 
     def test_run_once_reconciles_existing_inbox_processor(self) -> None:
         expected = {
@@ -35,12 +37,20 @@ class GmailPollTests(unittest.TestCase):
         with (
             patch("fitlit.config.GMAIL_INBOX_ENABLED", True),
             patch("fitlit.config.GMAIL_INBOX_POLL_SECONDS", 5),
+            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.EMAIL_AGENT_COPILOT_MODEL", "gpt-5.6-sol"),
+            patch("fitlit.config.EMAIL_AGENT_REASONING_EFFORT", "high"),
+            patch("fitlit.config.EMAIL_AGENT_CONTEXT_MESSAGES", 5),
             patch("fitlit.gmail_poll.gmail_auth.is_inbox_configured", return_value=True),
         ):
             self.assertEqual({
                 "enabled": True,
                 "configured": True,
                 "poll_seconds": 5,
+                "provider": "copilot",
+                "model": "gpt-5.6-sol",
+                "reasoning_effort": "high",
+                "context_messages": 5,
             }, gmail_poll.status())
 
 
