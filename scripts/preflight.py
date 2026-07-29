@@ -41,6 +41,10 @@ def collect() -> dict:
     providers = {
         name: bool(shutil.which(name)) for name in ("copilot", "codex", "claude")
     }
+    email_provider = os.environ.get(
+        "FITLIT_EMAIL_AGENT_PROVIDER",
+        dotenv.get("FITLIT_EMAIL_AGENT_PROVIDER", "copilot"),
+    ).lower()
     return {
         "python": {
             "version": ".".join(map(str, sys.version_info[:3])),
@@ -68,6 +72,28 @@ def collect() -> dict:
                 "FITLIT_GMAIL_INBOX_POLL_SECONDS",
                 dotenv.get("FITLIT_GMAIL_INBOX_POLL_SECONDS", "5"),
             )),
+            "email_agent": {
+                "provider": email_provider,
+                "provider_installed": providers.get(email_provider, False),
+                "model": os.environ.get(
+                    "FITLIT_EMAIL_AGENT_COPILOT_MODEL",
+                    dotenv.get(
+                        "FITLIT_EMAIL_AGENT_COPILOT_MODEL",
+                        "gpt-5.6-sol",
+                    ),
+                ) if email_provider == "copilot" else None,
+                "reasoning_effort": os.environ.get(
+                    "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
+                    dotenv.get(
+                        "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
+                        "high",
+                    ),
+                ),
+                "context_messages": int(os.environ.get(
+                    "FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES",
+                    dotenv.get("FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES", "5"),
+                )),
+            },
         },
         "systemd": bool(shutil.which("systemctl")),
         "repository": str(ROOT),
