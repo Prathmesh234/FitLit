@@ -173,25 +173,33 @@ catalog: workout ledger, trusted exercise calories and load, daily movement,
 sleep debt/consistency, HRV, resting heart rate, blood oxygen, respiratory rate,
 coverage-aware weekly trends, data-quality notes, and next-week priorities.
 
-Optional GitHub Copilot CLI, OpenAI Codex CLI, or Claude Code enrichment adds a
-small validated observation block after deterministic reservation. AI never
-decides whether to send, receives only allowlisted metrics, and fails back to
-the original report. See the Gmail service document and [`AGENT_START.md`](AGENT_START.md).
+Optional enrichment for proactive reports adds a small validated observation
+block after deterministic reservation. It never decides whether to send,
+receives only allowlisted metrics, and fails back to the original report. This
+is separate from the provider-centered conversational inbox described below.
+See the Gmail service document and [`AGENT_START.md`](AGENT_START.md).
 
 An optional read-only email command channel lets the configured user send
-`FitLit Ask:` questions to the same Gmail address and receive a threaded answer
-about sleep, workouts, activity, daily status, or the current week. It uses a
-separate `gmail.readonly` token, accepts only exact self-addressed commands,
-stores no question bodies, and cannot execute shell or write operations.
+`FitLit Ask:` questions to the same Gmail address and receive a provider-drafted
+threaded answer grounded in local health summaries. It uses a separate
+`gmail.readonly` token, accepts only exact self-addressed commands, stores no
+question bodies, and cannot alter FitLit data.
 A Gmail-only daemon checks for those commands every 5 seconds using the
 already-approved Gmail OAuth credentials. It is a simple systemd polling loop:
 no public endpoint, Pub/Sub topic, service account, or additional cloud
 authorization. The 15-minute timer stays enabled as a reliability fallback.
 See [`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
 
-The assistant remains conversational within the same Gmail thread: reply to a
-FitLit answer with the next question and it preserves the prior health intent
-without storing the email body. Unrelated reply threads are not accepted.
+The first successful command thread becomes the only chain polled afterward.
+Only its latest five messages are exposed in-memory to the selected headless
+provider, with the newest user turn authoritative; unrelated mail and older
+thread content are excluded. Copilot is the default harness using GPT-5.6 Sol
+at high reasoning effort. It drafts qualitative plain text and safe HTML,
+selects scalar evidence paths, and requests XLSX/DOCX artifact types. The
+runtime appends exact path/value traces and materializes fixed evidence tables
+with locally derived topics and filenames, so provider text cannot relabel
+health numbers. Temporary provider state and artifacts are deleted after
+delivery, and email bodies are never stored in SQLite.
 
 ### Container
 
