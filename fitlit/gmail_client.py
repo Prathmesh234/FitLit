@@ -3,20 +3,40 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from email.message import EmailMessage
 from email.utils import formataddr, parseaddr
+from pathlib import Path
+from collections.abc import Sequence
 
 from fitlit import config, gmail_auth
+
+_GMAIL_MESSAGE_ID = re.compile(r"^[A-Za-z0-9_-]{1,200}$")
 
 
 class GmailSendError(RuntimeError):
     """Raised when Gmail rejects or cannot complete a send."""
 
-    def __init__(self, message: str, *, retryable: bool = False):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        delivery_uncertain: bool = False,
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.delivery_uncertain = delivery_uncertain
+
+
+@dataclass(frozen=True)
+class EmailAttachment:
+    path: Path
+    filename: str
+    mime_type: str
 
 
 def validate_recipient(value: str) -> str:
@@ -34,6 +54,8 @@ def _raw_message(
     in_reply_to: str | None = None,
     references: str | None = None,
     category: str = "health-insight",
+    attachments: Sequence[EmailAttachment] = (),
+    source_message_id: str | None = None,
 ) -> str:
     recipient = validate_recipient(config.GMAIL_TO)
     message = EmailMessage()
@@ -45,8 +67,29 @@ def _raw_message(
     if references:
         message["References"] = references
     message["X-FitLit-Notification"] = category
+    if source_message_id:
+        if not _GMAIL_MESSAGE_ID.fullmatch(source_message_id):
+            raise GmailSendError("source Gmail message id is invalid")
+        message["X-FitLit-Source-Message-ID"] = source_message_id
     message.set_content(text)
     message.add_alternative(html, subtype="html")
+    for attachment in attachments:
+        if Path(attachment.filename).name != attachment.filename:
+            raise GmailSendError("attachment filename must not contain a path")
+        try:
+            maintype, subtype = attachment.mime_type.split("/", 1)
+        except ValueError as exc:
+            raise GmailSendError("attachment MIME type is invalid") from exc
+        try:
+            content = attachment.path.read_bytes()
+        except OSError as exc:
+            raise GmailSendError("attachment could not be read") from exc
+        message.add_attachment(
+            content,
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment.filename,
+        )
     return base64.urlsafe_b64encode(message.as_bytes()).decode("ascii").rstrip("=")
 
 
@@ -59,6 +102,8 @@ def send(
     in_reply_to: str | None = None,
     references: str | None = None,
     category: str = "health-insight",
+    attachments: Sequence[EmailAttachment] = (),
+    source_message_id: str | None = None,
 ) -> str:
     """Send one message and return Gmail's immutable message id."""
     raw = _raw_message(
@@ -68,6 +113,8 @@ def send(
         in_reply_to=in_reply_to,
         references=references,
         category=category,
+        attachments=attachments,
+        source_message_id=source_message_id,
     )
     payload = {"raw": raw}
     if thread_id:
@@ -89,10 +136,20 @@ def send(
         )
         try:
             with urllib.request.urlopen(request, timeout=config.REQUEST_TIMEOUT) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-            message_id = payload.get("id")
-            if not message_id:
-                raise GmailSendError("Gmail send response contained no message id")
+                response_body = response.read()
+            try:
+                payload = json.loads(response_body.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise GmailSendError(
+                    "Gmail send response was malformed",
+                    delivery_uncertain=True,
+                ) from exc
+            message_id = payload.get("id") if isinstance(payload, dict) else None
+            if not isinstance(message_id, str) or not message_id:
+                raise GmailSendError(
+                    "Gmail send response contained no message id",
+                    delivery_uncertain=True,
+                )
             return message_id
         except urllib.error.HTTPError as exc:
             if exc.code == 401 and attempt == 0:
@@ -106,7 +163,11 @@ def send(
             raise GmailSendError(
                 f"Gmail API {exc.code} {exc.reason}: {detail}",
                 retryable=retryable,
+                delivery_uncertain=500 <= exc.code <= 599,
             ) from exc
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise GmailSendError(f"Gmail API unreachable: {exc}") from exc
+            raise GmailSendError(
+                f"Gmail API unreachable: {exc}",
+                delivery_uncertain=True,
+            ) from exc
     raise GmailSendError("Gmail authorization retry failed")
