@@ -4,11 +4,12 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import shutil
 import signal
 import threading
 from datetime import datetime
 
-from fitlit import config, gmail_auth, gmail_inbox
+from fitlit import config, email_agent, gmail_auth, gmail_inbox
 from fitlit.journal import PACIFIC
 
 log = logging.getLogger("fitlit.gmail_poll")
@@ -24,6 +25,13 @@ def _validate_runtime() -> None:
         missing.append("FITLIT_GMAIL_INBOX_ENABLED=true")
     if not gmail_auth.is_inbox_configured():
         missing.append("Gmail inbox and send OAuth credentials")
+    if (
+        config.EMAIL_AGENT_PROVIDER not in email_agent.PROVIDERS
+        or not shutil.which(config.EMAIL_AGENT_PROVIDER)
+    ):
+        missing.append(
+            f"headless email provider {config.EMAIL_AGENT_PROVIDER!r}"
+        )
     if missing:
         raise GmailPollError("missing configuration: " + ", ".join(missing))
 
@@ -51,8 +59,13 @@ def run() -> None:
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
     log.info(
-        "Gmail-only command listener started with a %d-second interval",
+        "Gmail-only command listener started with a %d-second interval "
+        "using %s model %s at %s effort with %d-message context",
         config.GMAIL_INBOX_POLL_SECONDS,
+        config.EMAIL_AGENT_PROVIDER,
+        email_agent.selected_model() or "provider-default",
+        config.EMAIL_AGENT_REASONING_EFFORT,
+        config.EMAIL_AGENT_CONTEXT_MESSAGES,
     )
     while not stopped.is_set():
         run_once()
@@ -64,6 +77,10 @@ def status() -> dict:
         "enabled": config.GMAIL_INBOX_ENABLED,
         "configured": gmail_auth.is_inbox_configured(),
         "poll_seconds": config.GMAIL_INBOX_POLL_SECONDS,
+        "provider": config.EMAIL_AGENT_PROVIDER,
+        "model": email_agent.selected_model() or None,
+        "reasoning_effort": config.EMAIL_AGENT_REASONING_EFFORT,
+        "context_messages": config.EMAIL_AGENT_CONTEXT_MESSAGES,
     }
 
 
