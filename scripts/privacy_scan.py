@@ -18,6 +18,7 @@ PATTERNS = {
     "google-refresh-token": re.compile(r"\b1//[A-Za-z0-9_-]{20,}\b"),
     "oauth-code": re.compile(r"\b4/0A[A-Za-z0-9_-]{20,}\b"),
     "oauth-client-id": re.compile(r"\b\d{6,}-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com\b"),
+    "e164-phone": re.compile(r"(?<!\d)\+[1-9]\d{9,14}\b"),
     "absolute-home": re.compile(r"(?:/Users|/home)/[A-Za-z0-9._-]+/"),
     "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
 }
@@ -58,7 +59,12 @@ def _scan_text(label: str, text: str) -> list[str]:
 
 def scan_current() -> list[str]:
     findings = []
-    for path in _git("ls-files").splitlines():
+    for path in _git(
+        "ls-files",
+        "--cached",
+        "--others",
+        "--exclude-standard",
+    ).splitlines():
         file_path = ROOT / path
         try:
             text = file_path.read_text()
@@ -102,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
             check=False,
         ).returncode == 0
     ]
-    print(f"scanned tracked tree{' and history' if args.history else ''}")
+    print(f"scanned public working tree{' and history' if args.history else ''}")
     print(f"protected local paths: {', '.join(protected) if protected else 'none'}")
     _print_category("current-content", current_findings)
     if args.history:
