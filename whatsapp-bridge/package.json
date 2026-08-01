@@ -1,0 +1,20 @@
+{
+  "name": "fitlit-whatsapp-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "pair": "node --env-file=../.env src/bridge.mjs pair",
+    "start": "node --env-file=../.env src/bridge.mjs run",
+    "check": "node --check src/bridge.mjs && node --check src/config.mjs && node --check src/identity.mjs && node --check src/ledger.mjs && node --check src/messages.mjs && node --check src/python-agent.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": {
+    "baileys": "7.0.0-rc14",
+    "pino": "9.14.0",
+    "qrcode-terminal": "0.12.0"
+  }
+}
