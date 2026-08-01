@@ -201,6 +201,18 @@ with locally derived topics and filenames, so provider text cannot relabel
 health numbers. Temporary provider state and artifacts are deleted after
 delivery, and email bodies are never stored in SQLite.
 
+### Private WhatsApp self-chat
+
+An optional Baileys linked-device bridge provides the same grounded agent in
+WhatsApp's **Message yourself** chat with no command prefix or public webhook.
+It accepts only live messages from the paired account's exact self-chat,
+rejects groups/other users/history/generated replies, and retains at most five
+turns in memory. The on-disk ledger contains metadata only; linked-device keys
+remain under ignored owner-only state. Copilot still defaults to GPT-5.6 Sol at
+high reasoning effort, and evidence-only XLSX/DOCX results are sent as document
+attachments. Setup, risk, QR pairing, and operating commands are in
+[`docs/WHATSAPP_SERVICE.md`](docs/WHATSAPP_SERVICE.md).
+
 ### Container
 
 ```bash
