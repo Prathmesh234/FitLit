@@ -203,6 +203,28 @@ EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env(
     "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD",
     "0.20",
 )
+# Private WhatsApp self-chat bridge. Baileys keeps linked-device credentials in
+# data/state; only bounded message text crosses stdin to the shared agent.
+WHATSAPP_ENABLED = _env_bool("FITLIT_WHATSAPP_ENABLED")
+WHATSAPP_TRUSTED_USER_E164 = _env(
+    "FITLIT_WHATSAPP_TRUSTED_USER_E164",
+    "",
+)
+WHATSAPP_CONTEXT_MESSAGES = max(
+    1,
+    min(5, int(_env("FITLIT_WHATSAPP_CONTEXT_MESSAGES", "5"))),
+)
+WHATSAPP_BODY_MAX_CHARS = max(
+    100,
+    min(10_000, int(_env("FITLIT_WHATSAPP_BODY_MAX_CHARS", "2000"))),
+)
+WHATSAPP_AGENT_MAX_INPUT_BYTES = max(
+    10_000,
+    min(
+        250_000,
+        int(_env("FITLIT_WHATSAPP_AGENT_MAX_INPUT_BYTES", "50000")),
+    ),
+)
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
 AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")
