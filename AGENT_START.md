@@ -25,10 +25,13 @@ health value, diet, location, or private coaching context.
    bounded messages from its primary FitLit thread plus grounded summaries.
 5. Do not enable Gmail delivery until the recipient and daily policy are
    understood. Preview first.
+6. Treat `data/state/whatsapp-auth/` as login credentials. Never print, copy,
+   inspect, or commit its files or the private trusted phone number.
 
 ## 2. Prepare the clone
 
-Prerequisites: Linux with systemd, Git, curl, Python 3.11+, and `uv`.
+Prerequisites: Linux with systemd, Git, curl, Python 3.11+, and `uv`. The
+optional WhatsApp bridge additionally requires Node 20+ and npm.
 
 ```bash
 sudo apt-get update
@@ -42,7 +45,8 @@ uv run python scripts/preflight.py
 ```
 
 The preflight emits booleans and executable paths, never secret values. A
-nonzero exit means Python, `uv`, `.env`, or its permissions need attention.
+nonzero exit means a required base prerequisite—or an explicitly enabled
+WhatsApp bridge prerequisite—needs attention.
 
 ## 3. Configure Google Health OAuth
 
@@ -153,7 +157,32 @@ temporary working directory, strips application secrets, disables provider
 tools/instructions/session persistence where supported, enforces a timeout and
 schema, and sends the original report unchanged on any failure.
 
-## 6. Install all daemons
+## 6. Configure optional private WhatsApp
+
+The unofficial Baileys bridge is a replaceable private prototype; read its
+account-risk and privacy boundaries in
+[`docs/WHATSAPP_SERVICE.md`](docs/WHATSAPP_SERVICE.md). Install pinned
+dependencies, set the trusted E.164 number only in `.env`, and pair:
+
+```bash
+npm --prefix whatsapp-bridge ci
+npm --prefix whatsapp-bridge run pair
+```
+
+Scan from **WhatsApp → Settings → Linked Devices → Link a device**. Pairing
+credentials are written under ignored owner-only state. Enable the service only
+after successful pairing:
+
+```ini
+FITLIT_WHATSAPP_ENABLED=true
+FITLIT_WHATSAPP_CONTEXT_MESSAGES=5
+```
+
+The bridge accepts only the paired account's live self-chat, stores no bodies,
+keeps five in-memory turns, and routes responses through the same grounded
+provider harness.
+
+## 7. Install all daemons
 
 The installer discovers the current clone, service user, `uv`, and provider
 binary directories before rendering units:
@@ -172,12 +201,15 @@ Installed runtime:
 | `fitlit-gmail-poll.service` | Checks self-addressed Gmail commands every 5 seconds |
 | `fitlit-gmail.timer` | Launches the Gmail one-shot every 15 minutes |
 | `fitlit-gmail.service` | Detects, reserves, optionally enriches, and sends |
+| `fitlit-whatsapp.service` | Handles private WhatsApp self-chat questions |
 
-## 7. Verify operation
+## 8. Verify operation
 
 ```bash
 systemctl is-active fitlit.service fitlit-gc.service fitlit-gmail.timer
 systemctl is-enabled fitlit.service fitlit-gc.service fitlit-gmail.timer
+# If FITLIT_WHATSAPP_ENABLED=true:
+systemctl is-active fitlit-whatsapp.service
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/status
 uv run python -m fitlit.gmail_service status
@@ -192,7 +224,7 @@ ssh -N -L 8000:localhost:8000 <user>@<vm-host>
 
 Then open <http://localhost:8000>.
 
-## 8. Public-release gate
+## 9. Public-release gate
 
 ```bash
 uv run python scripts/privacy_scan.py
@@ -200,6 +232,7 @@ uv run python scripts/privacy_scan.py --history
 git status --short
 ```
 
-The tracked-tree scan must be clean. The history scan must also be clean before
-making the repository public; deleting a secret only from the latest commit is
-not sufficient. Review ignored/untracked files separately without adding them.
+The public working-tree scan covers tracked and nonignored untracked files and
+must be clean. The history scan must also be clean before making the repository
+public; deleting a secret only from the latest commit is not sufficient. Review
+ignored files separately without adding them.
