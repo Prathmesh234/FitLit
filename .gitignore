@@ -9,6 +9,7 @@ dist/
 # uv / virtualenv
 .venv/
 venv/
+node_modules/
 
 # Environment & secrets (OAuth tokens, client secrets)
 .env
