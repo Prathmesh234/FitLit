@@ -1,0 +1,23 @@
+[Unit]
+Description=FitLit private WhatsApp self-chat bridge
+After=network-online.target fitlit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__FITLIT_USER__
+WorkingDirectory=__FITLIT_ROOT__
+EnvironmentFile=-__FITLIT_ROOT__/.env
+Environment="PATH=__FITLIT_PATH__"
+Environment=NODE_ENV=production
+UMask=0077
+ExecStart=__NODE_PATH__ whatsapp-bridge/src/bridge.mjs run
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
