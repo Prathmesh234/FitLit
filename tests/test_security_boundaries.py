@@ -59,6 +59,19 @@ class RuntimePrivacyTests(unittest.TestCase):
             self.assertEqual(0o700, nested.stat().st_mode & 0o777)
             self.assertEqual(0o600, private_file.stat().st_mode & 0o777)
 
+    def test_installer_requires_registered_whatsapp_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            credentials = (
+                root / "data" / "state" / "whatsapp-auth" / "creds.json"
+            )
+            credentials.parent.mkdir(parents=True)
+            credentials.write_text('{"registered": false}')
+            with patch.object(install_services, "ROOT", root):
+                self.assertFalse(install_services._whatsapp_paired())
+                credentials.write_text('{"registered": true}')
+                self.assertTrue(install_services._whatsapp_paired())
+
     def test_privacy_scanner_detects_common_oauth_and_pat_formats(self) -> None:
         values = "\n".join(
             (
@@ -66,6 +79,7 @@ class RuntimePrivacyTests(unittest.TestCase):
                 "GOC" + "SPX-" + ("b" * 24),
                 "1" + "//" + ("c" * 30),
                 "ya" + "29." + ("d" * 30),
+                "+" + "1" + ("2" * 10),
             )
         )
         kinds = {
@@ -78,9 +92,21 @@ class RuntimePrivacyTests(unittest.TestCase):
                 "google-client-secret",
                 "google-refresh-token",
                 "google-access-token",
+                "e164-phone",
             },
             kinds,
         )
+
+    def test_privacy_scanner_includes_untracked_public_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "new.txt").write_text("+" + "1" + ("2" * 10))
+            with (
+                patch.object(privacy_scan, "ROOT", root),
+                patch.object(privacy_scan, "_git", return_value="new.txt\n"),
+            ):
+                findings = privacy_scan.scan_current()
+        self.assertEqual(["new.txt:1: e164-phone"], findings)
 
 
 if __name__ == "__main__":
