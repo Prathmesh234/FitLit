@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import pwd
 import shutil
@@ -15,9 +16,11 @@ DEPLOY = ROOT / "deploy"
 RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
 POLL_SERVICE_NAME = "fitlit-gmail-poll.service"
+WHATSAPP_SERVICE_NAME = "fitlit-whatsapp.service"
 UNIT_NAMES = (
     *SERVICE_NAMES,
     POLL_SERVICE_NAME,
+    WHATSAPP_SERVICE_NAME,
     "fitlit-gmail.timer",
 )
 LEGACY_UNIT_NAMES = ("fitlit-gmail-push.service",)
@@ -59,6 +62,59 @@ def _env_enabled(name: str) -> bool:
     return str(value or "").lower() in ("1", "true", "yes", "on")
 
 
+def _find_node(home: Path) -> Path:
+    candidates = [
+        Path(shutil.which("node") or ""),
+        home / ".local" / "bin" / "node",
+        home / ".nvm" / "current" / "bin" / "node",
+        Path("/usr/local/bin/node"),
+        Path("/usr/bin/node"),
+    ]
+    fallback = None
+    for candidate in dict.fromkeys(candidates):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            resolved = candidate.resolve()
+            fallback = fallback or resolved
+            try:
+                version = subprocess.run(
+                    [str(resolved), "--version"],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                ).stdout.strip().lstrip("v")
+                if int(version.split(".", 1)[0]) >= 20:
+                    return resolved
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
+    if _env_enabled("FITLIT_WHATSAPP_ENABLED"):
+        raise RuntimeError(
+            "Node 20+ was not found; install it before enabling WhatsApp"
+        )
+    return fallback or Path("/usr/bin/node")
+
+
+def _whatsapp_paired() -> bool:
+    path = ROOT / "data" / "state" / "whatsapp-auth" / "creds.json"
+    if path.is_symlink():
+        return False
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(value, dict) and value.get("registered") is True
+
+
+def _whatsapp_dependencies_ready() -> bool:
+    return (
+        ROOT
+        / "whatsapp-bridge"
+        / "node_modules"
+        / "baileys"
+        / "package.json"
+    ).is_file()
+
+
 def _harden_private_path(path: Path) -> None:
     if not path.exists():
         return
@@ -82,8 +138,10 @@ def harden_private_paths() -> None:
 def render() -> list[Path]:
     user, home = _service_user()
     uv = _find_uv(home)
+    node = _find_node(home)
     path_entries = [
         str(uv.parent),
+        str(node.parent),
         str(home / ".local" / "bin"),
         str(home / ".cargo" / "bin"),
         "/usr/local/sbin",
@@ -98,6 +156,7 @@ def render() -> list[Path]:
         "__FITLIT_ROOT__": str(ROOT),
         "__FITLIT_PATH__": ":".join(dict.fromkeys(path_entries)),
         "__UV_PATH__": str(uv),
+        "__NODE_PATH__": str(node),
     }
     RENDERED.mkdir(parents=True, exist_ok=True)
     outputs = []
@@ -105,7 +164,11 @@ def render() -> list[Path]:
         text = (DEPLOY / name).read_text()
         for marker, value in values.items():
             text = text.replace(marker, value)
-        if "__FITLIT_" in text or "__UV_PATH__" in text:
+        if (
+            "__FITLIT_" in text
+            or "__UV_PATH__" in text
+            or "__NODE_PATH__" in text
+        ):
             raise RuntimeError(f"unresolved placeholder in {name}")
         output = RENDERED / name
         output.write_text(text)
@@ -152,6 +215,24 @@ def install(outputs: list[Path], *, start: bool) -> None:
                 ["systemctl", "disable", "--now", POLL_SERVICE_NAME],
                 check=True,
             )
+        if (
+            _env_enabled("FITLIT_WHATSAPP_ENABLED")
+            and _whatsapp_paired()
+            and _whatsapp_dependencies_ready()
+        ):
+            enabled_units.append(WHATSAPP_SERVICE_NAME)
+        else:
+            subprocess.run(
+                ["systemctl", "disable", "--now", WHATSAPP_SERVICE_NAME],
+                check=True,
+            )
+            if _env_enabled("FITLIT_WHATSAPP_ENABLED"):
+                print(
+                    "warning: WhatsApp is enabled but pairing or npm "
+                    "dependencies are incomplete; "
+                    "leaving fitlit-whatsapp.service disabled",
+                    file=sys.stderr,
+                )
         subprocess.run(
             ["systemctl", "enable", "--now", *enabled_units],
             check=True,
