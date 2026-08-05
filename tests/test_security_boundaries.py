@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -59,18 +60,43 @@ class RuntimePrivacyTests(unittest.TestCase):
             self.assertEqual(0o700, nested.stat().st_mode & 0o777)
             self.assertEqual(0o600, private_file.stat().st_mode & 0o777)
 
-    def test_installer_requires_registered_whatsapp_credentials(self) -> None:
+    def test_installer_requires_configured_telegram_values(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            credentials = (
-                root / "data" / "state" / "whatsapp-auth" / "creds.json"
+            (root / ".env").write_text(
+                "FITLIT_TELEGRAM_BOT_TOKEN=\n"
+                "FITLIT_TELEGRAM_TRUSTED_USER_ID=123\n"
             )
-            credentials.parent.mkdir(parents=True)
-            credentials.write_text('{"registered": false}')
+            with (
+                patch.object(install_services, "ROOT", root),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertFalse(
+                    install_services._env_configured(
+                        "FITLIT_TELEGRAM_BOT_TOKEN"
+                    )
+                )
+                self.assertTrue(
+                    install_services._env_configured(
+                        "FITLIT_TELEGRAM_TRUSTED_USER_ID"
+                    )
+                )
+                self.assertFalse(install_services._telegram_ready())
+
+    def test_installer_removes_legacy_whatsapp_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            auth = root / "data" / "state" / "whatsapp-auth"
+            auth.mkdir(parents=True)
+            (auth / "creds.json").write_text("private")
+            ledger = root / "data" / "state" / "whatsapp-ledger.json"
+            ledger.write_text("{}")
             with patch.object(install_services, "ROOT", root):
-                self.assertFalse(install_services._whatsapp_paired())
-                credentials.write_text('{"registered": true}')
-                self.assertTrue(install_services._whatsapp_paired())
+                self.assertTrue(
+                    install_services.remove_legacy_whatsapp_state()
+                )
+            self.assertFalse(auth.exists())
+            self.assertFalse(ledger.exists())
 
     def test_privacy_scanner_detects_common_oauth_and_pat_formats(self) -> None:
         values = "\n".join(
@@ -80,6 +106,7 @@ class RuntimePrivacyTests(unittest.TestCase):
                 "1" + "//" + ("c" * 30),
                 "ya" + "29." + ("d" * 30),
                 "+" + "1" + ("2" * 10),
+                ("1" * 9) + ":" + ("e" * 35),
             )
         )
         kinds = {
@@ -93,6 +120,7 @@ class RuntimePrivacyTests(unittest.TestCase):
                 "google-refresh-token",
                 "google-access-token",
                 "e164-phone",
+                "telegram-bot-token",
             },
             kinds,
         )

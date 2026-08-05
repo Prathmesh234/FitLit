@@ -18,6 +18,7 @@ PATTERNS = {
     "google-refresh-token": re.compile(r"\b1//[A-Za-z0-9_-]{20,}\b"),
     "oauth-code": re.compile(r"\b4/0A[A-Za-z0-9_-]{20,}\b"),
     "oauth-client-id": re.compile(r"\b\d{6,}-[A-Za-z0-9_-]+\.apps\.googleusercontent\.com\b"),
+    "telegram-bot-token": re.compile(r"\b\d{6,12}:[A-Za-z0-9_-]{30,}\b"),
     "e164-phone": re.compile(r"(?<!\d)\+[1-9]\d{9,14}\b"),
     "absolute-home": re.compile(r"(?:/Users|/home)/[A-Za-z0-9._-]+/"),
     "email": re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I),
