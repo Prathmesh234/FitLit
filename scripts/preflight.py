@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import stat
-import subprocess
 import sys
 from pathlib import Path
 
@@ -17,7 +17,7 @@ REQUIRED_HEALTH = (
     "GOOGLE_HEALTH_CLIENT_SECRET",
     "GOOGLE_HEALTH_REFRESH_TOKEN",
 )
-WHATSAPP_AUTH = ROOT / "data" / "state" / "whatsapp-auth" / "creds.json"
+TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 
 
 def _dotenv() -> dict[str, str]:
@@ -40,41 +40,6 @@ def _enabled(dotenv: dict[str, str], name: str) -> bool:
     return _value(dotenv, name).lower() in ("1", "true", "yes", "on")
 
 
-def _node_status() -> dict:
-    node = shutil.which("node")
-    version = None
-    supported = False
-    if node:
-        try:
-            version = subprocess.run(
-                [node, "--version"],
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=5,
-            ).stdout.strip().lstrip("v")
-            major = int(version.split(".", 1)[0])
-            supported = major >= 20
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
-    return {
-        "path": node,
-        "version": version,
-        "supported": supported,
-        "npm": shutil.which("npm"),
-    }
-
-
-def _whatsapp_paired() -> bool:
-    if WHATSAPP_AUTH.is_symlink():
-        return False
-    try:
-        value = json.loads(WHATSAPP_AUTH.read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
-    return isinstance(value, dict) and value.get("registered") is True
-
-
 def collect() -> dict:
     dotenv = _dotenv()
     keys = set(dotenv) | set(os.environ)
@@ -87,25 +52,24 @@ def collect() -> dict:
         "FITLIT_EMAIL_AGENT_PROVIDER",
         "copilot",
     ).lower()
-    whatsapp_enabled = _enabled(dotenv, "FITLIT_WHATSAPP_ENABLED")
-    trusted_number_configured = bool(_value(
+    telegram_enabled = _enabled(dotenv, "FITLIT_TELEGRAM_ENABLED")
+    telegram_token = _value(
         dotenv,
-        "FITLIT_WHATSAPP_TRUSTED_USER_E164",
-    ))
-    whatsapp_paired = _whatsapp_paired()
-    node_status = _node_status()
-    whatsapp_dependencies = (
-        ROOT
-        / "whatsapp-bridge"
-        / "node_modules"
-        / "baileys"
-        / "package.json"
-    ).is_file()
-    whatsapp_ready = all((
-        trusted_number_configured,
-        whatsapp_paired,
-        node_status["supported"],
-        whatsapp_dependencies,
+        "FITLIT_TELEGRAM_BOT_TOKEN",
+    )
+    telegram_user = _value(
+        dotenv,
+        "FITLIT_TELEGRAM_TRUSTED_USER_ID",
+    )
+    telegram_token_configured = bool(telegram_token)
+    telegram_token_valid = bool(TELEGRAM_TOKEN_PATTERN.fullmatch(telegram_token))
+    telegram_user_configured = bool(telegram_user)
+    telegram_user_valid = (
+        telegram_user.isdecimal() and int(telegram_user) > 0
+    )
+    telegram_ready = all((
+        telegram_token_valid,
+        telegram_user_valid,
         providers.get(email_provider, False),
     ))
     return {
@@ -153,18 +117,30 @@ def collect() -> dict:
                 )),
             },
         },
-        "whatsapp": {
-            "enabled": whatsapp_enabled,
-            "ready": whatsapp_ready,
-            "trusted_number_configured": trusted_number_configured,
-            "paired": whatsapp_paired,
-            "context_messages": int(_value(
+        "telegram": {
+            "enabled": telegram_enabled,
+            "ready": telegram_ready,
+            "bot_token_configured": telegram_token_configured,
+            "bot_token_format_valid": telegram_token_valid,
+            "trusted_user_configured": telegram_user_configured,
+            "trusted_user_valid": telegram_user_valid,
+            "context_policy": "complete-active-conversation",
+            "transcript_path": "data/state/telegram-conversations.sqlite3",
+            "model": _value(
                 dotenv,
-                "FITLIT_WHATSAPP_CONTEXT_MESSAGES",
+                "FITLIT_TELEGRAM_COPILOT_MODEL",
+                "gpt-5.6-terra",
+            ) if email_provider == "copilot" else None,
+            "reasoning_effort": _value(
+                dotenv,
+                "FITLIT_TELEGRAM_REASONING_EFFORT",
+                "high",
+            ),
+            "long_poll_seconds": int(_value(
+                dotenv,
+                "FITLIT_TELEGRAM_POLL_TIMEOUT_SECONDS",
                 "5",
             )),
-            "node": node_status,
-            "dependencies_installed": whatsapp_dependencies,
         },
         "systemd": bool(shutil.which("systemctl")),
         "repository": str(ROOT),
@@ -180,8 +156,8 @@ def main() -> int:
         and result["env"]["exists"]
         and result["env"]["private_permissions"]
         and (
-            not result["whatsapp"]["enabled"]
-            or result["whatsapp"]["ready"]
+            not result["telegram"]["enabled"]
+            or result["telegram"]["ready"]
         )
     )
     return 0 if required_ok else 1

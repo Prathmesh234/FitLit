@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -16,14 +16,18 @@ DEPLOY = ROOT / "deploy"
 RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
 POLL_SERVICE_NAME = "fitlit-gmail-poll.service"
-WHATSAPP_SERVICE_NAME = "fitlit-whatsapp.service"
+TELEGRAM_SERVICE_NAME = "fitlit-telegram.service"
 UNIT_NAMES = (
     *SERVICE_NAMES,
     POLL_SERVICE_NAME,
-    WHATSAPP_SERVICE_NAME,
+    TELEGRAM_SERVICE_NAME,
     "fitlit-gmail.timer",
 )
-LEGACY_UNIT_NAMES = ("fitlit-gmail-push.service",)
+LEGACY_UNIT_NAMES = (
+    "fitlit-gmail-push.service",
+    "fitlit-whatsapp.service",
+)
+TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 PRIVATE_PATHS = (
     ROOT / ".env",
     ROOT / "AGENTS.md",
@@ -62,57 +66,49 @@ def _env_enabled(name: str) -> bool:
     return str(value or "").lower() in ("1", "true", "yes", "on")
 
 
-def _find_node(home: Path) -> Path:
-    candidates = [
-        Path(shutil.which("node") or ""),
-        home / ".local" / "bin" / "node",
-        home / ".nvm" / "current" / "bin" / "node",
-        Path("/usr/local/bin/node"),
-        Path("/usr/bin/node"),
-    ]
-    fallback = None
-    for candidate in dict.fromkeys(candidates):
-        if candidate.is_file() and os.access(candidate, os.X_OK):
-            resolved = candidate.resolve()
-            fallback = fallback or resolved
-            try:
-                version = subprocess.run(
-                    [str(resolved), "--version"],
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                ).stdout.strip().lstrip("v")
-                if int(version.split(".", 1)[0]) >= 20:
-                    return resolved
-            except (OSError, ValueError, subprocess.SubprocessError):
-                continue
-    if _env_enabled("FITLIT_WHATSAPP_ENABLED"):
-        raise RuntimeError(
-            "Node 20+ was not found; install it before enabling WhatsApp"
-        )
-    return fallback or Path("/usr/bin/node")
+def _env_value(name: str) -> str:
+    value = os.environ.get(name)
+    if value is None:
+        env_path = ROOT / ".env"
+        if env_path.exists():
+            for raw in env_path.read_text().splitlines():
+                key, separator, candidate = raw.partition("=")
+                if separator and key.strip() == name:
+                    value = candidate.strip().strip('"').strip("'")
+                    break
+    return str(value or "").strip()
 
 
-def _whatsapp_paired() -> bool:
-    path = ROOT / "data" / "state" / "whatsapp-auth" / "creds.json"
-    if path.is_symlink():
-        return False
-    try:
-        value = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
-        return False
-    return isinstance(value, dict) and value.get("registered") is True
+def _env_configured(name: str) -> bool:
+    return bool(_env_value(name))
 
 
-def _whatsapp_dependencies_ready() -> bool:
-    return (
-        ROOT
-        / "whatsapp-bridge"
-        / "node_modules"
-        / "baileys"
-        / "package.json"
-    ).is_file()
+def _telegram_ready() -> bool:
+    token = _env_value("FITLIT_TELEGRAM_BOT_TOKEN")
+    user_id = _env_value("FITLIT_TELEGRAM_TRUSTED_USER_ID")
+    return bool(
+        TELEGRAM_TOKEN_PATTERN.fullmatch(token)
+        and user_id.isdecimal()
+        and int(user_id) > 0
+    )
+
+
+def remove_legacy_whatsapp_state() -> bool:
+    removed = False
+    for path in (
+        ROOT / "data" / "state" / "whatsapp-auth",
+        ROOT / "data" / "state" / "whatsapp-ledger.json",
+    ):
+        if path.is_symlink():
+            raise RuntimeError(f"refusing symlinked legacy private path: {path}")
+        if not path.exists():
+            continue
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        removed = True
+    return removed
 
 
 def _harden_private_path(path: Path) -> None:
@@ -138,10 +134,8 @@ def harden_private_paths() -> None:
 def render() -> list[Path]:
     user, home = _service_user()
     uv = _find_uv(home)
-    node = _find_node(home)
     path_entries = [
         str(uv.parent),
-        str(node.parent),
         str(home / ".local" / "bin"),
         str(home / ".cargo" / "bin"),
         "/usr/local/sbin",
@@ -156,7 +150,6 @@ def render() -> list[Path]:
         "__FITLIT_ROOT__": str(ROOT),
         "__FITLIT_PATH__": ":".join(dict.fromkeys(path_entries)),
         "__UV_PATH__": str(uv),
-        "__NODE_PATH__": str(node),
     }
     RENDERED.mkdir(parents=True, exist_ok=True)
     outputs = []
@@ -167,7 +160,6 @@ def render() -> list[Path]:
         if (
             "__FITLIT_" in text
             or "__UV_PATH__" in text
-            or "__NODE_PATH__" in text
         ):
             raise RuntimeError(f"unresolved placeholder in {name}")
         output = RENDERED / name
@@ -183,9 +175,6 @@ def install(outputs: list[Path], *, start: bool) -> None:
             command += " --start"
         raise RuntimeError(f"installation needs root; rerun: {command}")
     harden_private_paths()
-    for output in outputs:
-        shutil.copyfile(output, Path("/etc/systemd/system") / output.name)
-        os.chmod(Path("/etc/systemd/system") / output.name, 0o644)
     for name in LEGACY_UNIT_NAMES:
         load_state = subprocess.run(
             ["systemctl", "show", name, "--property=LoadState", "--value"],
@@ -201,6 +190,15 @@ def install(outputs: list[Path], *, start: bool) -> None:
         legacy = Path("/etc/systemd/system") / name
         if legacy.exists():
             legacy.unlink()
+    if remove_legacy_whatsapp_state():
+        print(
+            "warning: removed legacy local WhatsApp state; revoke the old "
+            "FitLit linked device in the WhatsApp mobile app",
+            file=sys.stderr,
+        )
+    for output in outputs:
+        shutil.copyfile(output, Path("/etc/systemd/system") / output.name)
+        os.chmod(Path("/etc/systemd/system") / output.name, 0o644)
     subprocess.run(["systemctl", "daemon-reload"], check=True)
     if start:
         enabled_units = [
@@ -216,21 +214,19 @@ def install(outputs: list[Path], *, start: bool) -> None:
                 check=True,
             )
         if (
-            _env_enabled("FITLIT_WHATSAPP_ENABLED")
-            and _whatsapp_paired()
-            and _whatsapp_dependencies_ready()
+            _env_enabled("FITLIT_TELEGRAM_ENABLED")
+            and _telegram_ready()
         ):
-            enabled_units.append(WHATSAPP_SERVICE_NAME)
+            enabled_units.append(TELEGRAM_SERVICE_NAME)
         else:
             subprocess.run(
-                ["systemctl", "disable", "--now", WHATSAPP_SERVICE_NAME],
+                ["systemctl", "disable", "--now", TELEGRAM_SERVICE_NAME],
                 check=True,
             )
-            if _env_enabled("FITLIT_WHATSAPP_ENABLED"):
+            if _env_enabled("FITLIT_TELEGRAM_ENABLED"):
                 print(
-                    "warning: WhatsApp is enabled but pairing or npm "
-                    "dependencies are incomplete; "
-                    "leaving fitlit-whatsapp.service disabled",
+                    "warning: Telegram is enabled but its token or trusted "
+                    "user is missing; leaving fitlit-telegram.service disabled",
                     file=sys.stderr,
                 )
         subprocess.run(
