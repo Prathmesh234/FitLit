@@ -10,4 +10,5 @@ dependencies = [
     "uvicorn>=0.34",
     "openpyxl>=3.1.5",
     "python-docx>=1.2.0",
+    "pillow>=11.0",
 ]
