@@ -25,13 +25,12 @@ health value, diet, location, or private coaching context.
    bounded messages from its primary FitLit thread plus grounded summaries.
 5. Do not enable Gmail delivery until the recipient and daily policy are
    understood. Preview first.
-6. Treat `data/state/whatsapp-auth/` as login credentials. Never print, copy,
-   inspect, or commit its files or the private trusted phone number.
+6. Treat the Telegram bot token and trusted numeric user ID as private. Never
+   print, inspect, or commit either value.
 
 ## 2. Prepare the clone
 
-Prerequisites: Linux with systemd, Git, curl, Python 3.11+, and `uv`. The
-optional WhatsApp bridge additionally requires Node 20+ and npm.
+Prerequisites: Linux with systemd, Git, curl, Python 3.11+, and `uv`.
 
 ```bash
 sudo apt-get update
@@ -46,7 +45,7 @@ uv run python scripts/preflight.py
 
 The preflight emits booleans and executable paths, never secret values. A
 nonzero exit means a required base prerequisite—or an explicitly enabled
-WhatsApp bridge prerequisite—needs attention.
+Telegram channel prerequisite—needs attention.
 
 ## 3. Configure Google Health OAuth
 
@@ -119,11 +118,21 @@ FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
 
 Copilot runs with an isolated temporary `COPILOT_HOME`, no remote export, no
-MCP servers, and only read access to its temporary request. It drafts
-qualitative text and safe HTML, selects scalar evidence paths, and chooses any
-requested XLSX/DOCX type. The runtime appends exact path/value traces, owns
-topics, filenames, columns, and data cells, and deletes request files, provider
-state, logs, and artifacts after delivery.
+MCP servers, and only read access to its temporary request. It produces natural
+conversational text, selects scalar evidence paths for health claims, and can
+request XLSX/DOCX/HTML/PNG types. The runtime appends exact evidence values,
+renders safe HTML locally, and owns all artifact titles, filenames, labels, and
+bytes. Request files, provider state, logs, and artifacts are deleted after
+delivery.
+
+The optional Telegram daemon long-polls every five seconds and stores complete
+indexed conversations in owner-only
+`data/state/telegram-conversations.sqlite3`. Each normal message supplies the
+entire active transcript to the same isolated provider with
+`**LATEST QUERY**` explicitly marked. `/new` archives the current thread and
+starts the next index without deleting history; `/reset` is disabled. Telegram
+can deliver the same XLSX/DOCX evidence plus safe HTML and locally rendered PNG
+screenshot artifacts.
 
 ## 5. Configure optional proactive-report AI
 
@@ -157,30 +166,30 @@ temporary working directory, strips application secrets, disables provider
 tools/instructions/session persistence where supported, enforces a timeout and
 schema, and sends the original report unchanged on any failure.
 
-## 6. Configure optional private WhatsApp
+## 6. Configure optional private Telegram
 
-The unofficial Baileys bridge is a replaceable private prototype; read its
-account-risk and privacy boundaries in
-[`docs/WHATSAPP_SERVICE.md`](docs/WHATSAPP_SERVICE.md). Install pinned
-dependencies, set the trusted E.164 number only in `.env`, and pair:
-
-```bash
-npm --prefix whatsapp-bridge ci
-npm --prefix whatsapp-bridge run pair
-```
-
-Scan from **WhatsApp → Settings → Linked Devices → Link a device**. Pairing
-credentials are written under ignored owner-only state. Enable the service only
-after successful pairing:
+Create a bot through Telegram's verified **@BotFather**, place the returned
+token only in mode-`0600` `.env`, then start one-time pairing:
 
 ```ini
-FITLIT_WHATSAPP_ENABLED=true
-FITLIT_WHATSAPP_CONTEXT_MESSAGES=5
+FITLIT_TELEGRAM_BOT_TOKEN=your-private-bot-token
 ```
 
-The bridge accepts only the paired account's live self-chat, stores no bodies,
-keeps five in-memory turns, and routes responses through the same grounded
-provider harness.
+```bash
+uv run python -m fitlit.telegram_service pair
+```
+
+The command prints a random `/pair` message. Send it to the new bot within five
+minutes. FitLit writes the exact numeric user allowlist and enables Telegram in
+private `.env` without printing either value. See
+[`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md) for the cloud-chat
+privacy boundary and revocation steps.
+
+The daemon uses outbound long polling rather than a webhook and silently
+ignores every unpaired user and non-private chat. Complete indexed
+user/assistant transcripts persist in owner-only local SQLite, and the full
+active conversation is supplied to the same grounded provider harness.
+`/new` archives the current thread without deleting it.
 
 ## 7. Install all daemons
 
@@ -201,15 +210,15 @@ Installed runtime:
 | `fitlit-gmail-poll.service` | Checks self-addressed Gmail commands every 5 seconds |
 | `fitlit-gmail.timer` | Launches the Gmail one-shot every 15 minutes |
 | `fitlit-gmail.service` | Detects, reserves, optionally enriches, and sends |
-| `fitlit-whatsapp.service` | Handles private WhatsApp self-chat questions |
+| `fitlit-telegram.service` | Handles private allowlisted Telegram questions |
 
 ## 8. Verify operation
 
 ```bash
 systemctl is-active fitlit.service fitlit-gc.service fitlit-gmail.timer
 systemctl is-enabled fitlit.service fitlit-gc.service fitlit-gmail.timer
-# If FITLIT_WHATSAPP_ENABLED=true:
-systemctl is-active fitlit-whatsapp.service
+# If FITLIT_TELEGRAM_ENABLED=true:
+systemctl is-active fitlit-telegram.service
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/status
 uv run python -m fitlit.gmail_service status

@@ -194,24 +194,32 @@ The first successful command thread becomes the only chain polled afterward.
 Only its latest five messages are exposed in-memory to the selected headless
 provider, with the newest user turn authoritative; unrelated mail and older
 thread content are excluded. Copilot is the default harness using GPT-5.6 Sol
-at high reasoning effort. It drafts qualitative plain text and safe HTML,
-selects scalar evidence paths, and requests XLSX/DOCX artifact types. The
-runtime appends exact path/value traces and materializes fixed evidence tables
-with locally derived topics and filenames, so provider text cannot relabel
-health numbers. Temporary provider state and artifacts are deleted after
-delivery, and email bodies are never stored in SQLite.
+at high reasoning effort. It produces natural conversational text, selects
+scalar evidence paths for health claims, and requests artifact types when
+needed. The runtime appends exact path/value evidence and deterministically
+wraps a strictly validated semantic fragment in the fixed responsive FitLit
+theme, plus evidence-only XLSX, DOCX, HTML, or PNG artifacts.
+Temporary provider state and artifacts are deleted after delivery, and email
+bodies are never stored in SQLite.
 
-### Private WhatsApp self-chat
+### Private Telegram bot
 
-An optional Baileys linked-device bridge provides the same grounded agent in
-WhatsApp's **Message yourself** chat with no command prefix or public webhook.
-It accepts only live messages from the paired account's exact self-chat,
-rejects groups/other users/history/generated replies, and retains at most five
-turns in memory. The on-disk ledger contains metadata only; linked-device keys
-remain under ignored owner-only state. Copilot still defaults to GPT-5.6 Sol at
-high reasoning effort, and evidence-only XLSX/DOCX results are sent as document
-attachments. Setup, risk, QR pairing, and operating commands are in
-[`docs/WHATSAPP_SERVICE.md`](docs/WHATSAPP_SERVICE.md).
+An optional official Telegram Bot API channel provides the same grounded agent
+in a private bot chat with no public webhook. A one-time random pairing command
+binds one exact numeric Telegram user ID; all other users and non-private chats
+are silently ignored. The daemon persists complete owner-only indexed
+conversations and supplies the full active transcript with an explicit
+`**LATEST QUERY**` marker to the isolated headless provider. `/new` archives
+the current thread without deleting it; `/reset` is disabled. Copilot still
+defaults to GPT-5.6 Sol at high reasoning effort, and evidence-only XLSX, DOCX,
+safe themed HTML, and locally rendered PNG screenshot results can be delivered.
+Official Bot API long polling returns immediately on message arrival, while a
+typing heartbeat covers provider generation time; no WebSocket or public
+webhook is required for this single-user deployment. Telegram uses GPT-5.6
+Terra at high reasoning effort independently from Gmail, and all HTML uses the
+same mobile-first FitLit email theme.
+Setup, privacy boundaries, pairing, and operating commands are in
+[`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md).
 
 ### Container
 
