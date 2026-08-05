@@ -828,14 +828,16 @@ class InboxProcessingTests(unittest.TestCase):
     def test_send_failure_deletes_generated_attachment(self) -> None:
         attachment_path: Path | None = None
 
-        def adapter(_root: Path) -> str:
+        def adapter(_root: Path, **kwargs) -> str:
             return json.dumps({
-                "text": "Grounded answer. Exact facts follow.",
-                "html": "<p>Grounded answer. Exact facts follow.</p>",
+                "text": "Here is your grounded FitLit response.",
+                "html": (
+                    "<section><h1>FitLit insight</h1>"
+                    "<p>Here is your grounded FitLit response.</p></section>"
+                ),
                 "evidence_paths": ["daily.steps"],
                 "artifacts": [{
                     "kind": "xlsx",
-                    "sheet_name": "Health",
                     "evidence_paths": ["daily.steps"],
                 }],
             })

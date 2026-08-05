@@ -38,16 +38,19 @@ def turns(count: int = 1) -> list[email_agent.ThreadTurn]:
 def response(
     *,
     artifacts: list[dict] | None = None,
-    text: str = "Grounded summary. Exact facts follow.",
+    evidence_paths: list[str] | None = None,
+    text: str = "Here is your grounded FitLit response.",
     html: str = (
-        "<html><body><h1>Grounded summary</h1>"
-        "<p>Exact facts follow.</p></body></html>"
+        "<section><h1>FitLit insight</h1>"
+        "<p>Here is your grounded FitLit response.</p></section>"
     ),
 ) -> str:
     return json.dumps({
         "text": text,
         "html": html,
-        "evidence_paths": ["daily.steps"],
+        "evidence_paths": (
+            ["daily.steps"] if evidence_paths is None else evidence_paths
+        ),
         "artifacts": artifacts or [],
     })
 
@@ -71,9 +74,38 @@ class EmailAgentRequestTests(unittest.TestCase):
         )
         instructions = " ".join(request["system_instructions"]).lower()
         self.assertIn("absolutely accurate", instructions)
-        self.assertIn("do not write digits", instructions)
-        self.assertIn("runtime owns filenames", instructions)
+        self.assertIn("respond naturally", instructions)
+        self.assertIn("greetings, small talk", instructions)
         self.assertIn("deletes every request file", instructions)
+        self.assertIn("mobile-first", instructions)
+        self.assertIn("no more than three columns", instructions)
+        self.assertIn("exact fitlit email presentation system", instructions)
+
+    def test_telegram_request_contains_complete_history_and_bold_latest_query(
+        self,
+    ) -> None:
+        with patch(
+            "fitlit.email_agent.build_grounding",
+            return_value={"daily": {"steps": 10000}},
+        ):
+            request = email_agent._request(
+                turns(8),
+                NOW,
+                context_limit=None,
+                channel="telegram",
+            )
+        self.assertEqual(8, len(request["context_messages"]))
+        self.assertTrue(
+            request["context_policy"]["complete_conversation_supplied"]
+        )
+        self.assertEqual(
+            "**LATEST QUERY**\n\nlatest question",
+            request["latest_query_markdown"],
+        )
+        self.assertIn(
+            "owner-only Telegram conversation transcript",
+            " ".join(request["system_instructions"]),
+        )
 
     def test_latest_bounded_turn_must_be_user_authored(self) -> None:
         values = [
@@ -99,18 +131,75 @@ class EmailAgentRequestTests(unittest.TestCase):
             email_agent._validate_output(non_scalar, "copilot", grounding)
 
         unsafe = json.loads(response())
-        unsafe["html"] = "<html><body><script>alert(1)</script></body></html>"
+        unsafe["html"] = (
+            '<div style="background-image:\\75 rl(https://example.invalid)">'
+            "unsafe</div>"
+        )
         with self.assertRaises(email_agent.EmailAgentError):
             email_agent._validate_output(unsafe, "copilot", grounding)
 
-    def test_provider_authored_numbers_and_number_words_are_rejected(self) -> None:
+    def test_output_accepts_semantic_attribute_free_html(self) -> None:
         grounding = {"daily": {"steps": 10000}}
-        for claim in ("Steps were 10000.", "There were ninety workouts."):
-            value = json.loads(response())
-            value["text"] = claim
-            value["html"] = f"<p>{claim}</p>"
-            with self.assertRaises(email_agent.EmailAgentError):
-                email_agent._validate_output(value, "copilot", grounding)
+        value = json.loads(response(html=(
+            "<section><header><h1>Daily movement</h1></header>"
+            "<p><strong>10,000 steps</strong> recorded.</p>"
+            "<table><tbody><tr><th>Metric</th><td>Steps</td></tr>"
+            "</tbody></table></section>"
+        )))
+        validated = email_agent._validate_output(value, "copilot", grounding)
+        rendered = email_agent._render_reply_html(
+            validated["html"],
+            validated["evidence_rows"],
+        )
+        self.assertIn("linear-gradient", rendered)
+        self.assertIn("Daily movement", rendered)
+        self.assertIn("Grounded evidence", rendered)
+        self.assertIn("daily.steps", rendered)
+
+    def test_output_rejects_unbalanced_or_active_html(self) -> None:
+        grounding = {"daily": {"steps": 10000}}
+        unsafe_fragments = (
+            "<section><p>unbalanced</section>",
+            "<p class=\"metric\">attributes</p>",
+            "<script>alert(1)</script>",
+            "<a href=\"https://example.invalid\">remote</a>",
+            "<!-- hidden --><p>content</p>",
+            (
+                "<table><tr><td>1</td><td>2</td><td>3</td>"
+                "<td>4</td></tr></table>"
+            ),
+        )
+        for fragment in unsafe_fragments:
+            with self.subTest(fragment=fragment):
+                with self.assertRaises(email_agent.EmailAgentError):
+                    email_agent._validate_output(
+                        json.loads(response(html=fragment)),
+                        "copilot",
+                        grounding,
+                    )
+
+    def test_natural_conversation_can_have_no_evidence(self) -> None:
+        grounding = {"daily": {"steps": 10000}}
+        validated = email_agent._validate_output(
+            json.loads(response(
+                text="Hey! What would you like to explore in FitLit?",
+                evidence_paths=[],
+            )),
+            "copilot",
+            grounding,
+        )
+        self.assertEqual(
+            "Hey! What would you like to explore in FitLit?",
+            validated["text"],
+        )
+        self.assertEqual([], validated["evidence_rows"])
+        self.assertEqual(
+            validated["text"],
+            email_agent._render_reply_text(
+                validated["text"],
+                validated["evidence_rows"],
+            ),
+        )
 
     def test_exact_values_are_bound_to_runtime_evidence_paths(self) -> None:
         grounding = {"daily": {"steps": 10000}}
@@ -123,11 +212,8 @@ class EmailAgentRequestTests(unittest.TestCase):
         self.assertEqual(("daily.steps",), validated["evidence_paths"])
         self.assertEqual([["daily.steps", 10000]], validated["evidence_rows"])
         self.assertIn(
-            "daily.steps = 10000",
-            email_agent._append_evidence_text(
-                validated["text"],
-                validated["evidence_rows"],
-            ),
+            "Daily › Steps: 10000 [daily.steps]",
+            email_agent._render_evidence_text(validated["evidence_rows"]),
         )
 
     def test_provider_cannot_control_persisted_topic_or_filename(self) -> None:
@@ -140,7 +226,6 @@ class EmailAgentRequestTests(unittest.TestCase):
         artifact = json.loads(response(artifacts=[{
             "kind": "xlsx",
             "filename": "weight-999-lb.xlsx",
-            "sheet_name": "Health",
             "evidence_paths": ["daily.steps"],
         }]))
         with self.assertRaises(email_agent.EmailAgentError):
@@ -200,6 +285,26 @@ class EmailAgentProviderTests(unittest.TestCase):
         self.assertIn("--no-remote-export", command)
         self.assertNotIn(marker, " ".join(command))
 
+    def test_copilot_honors_isolated_model_and_effort_overrides(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            with (
+                patch("fitlit.email_agent._prepare_copilot_home"),
+                patch("fitlit.email_agent._run", return_value=response()) as run,
+            ):
+                email_agent._copilot(
+                    root,
+                    model="gpt-5.6-terra",
+                    reasoning_effort="high",
+                )
+        command = run.call_args.args[0]
+        self.assertEqual("gpt-5.6-terra", command[command.index("--model") + 1])
+        self.assertEqual(
+            "high",
+            command[command.index("--reasoning-effort") + 1],
+        )
+
     def test_provider_timeout_is_a_retryable_agent_error(self) -> None:
         with (
             tempfile.TemporaryDirectory() as directory,
@@ -255,22 +360,28 @@ class EmailAgentProviderTests(unittest.TestCase):
             "```json\n" + response() + "\n```",
             "copilot",
         )
-        self.assertEqual("Grounded summary. Exact facts follow.", parsed["text"])
+        self.assertEqual(["daily.steps"], parsed["evidence_paths"])
         with self.assertRaises(email_agent.EmailAgentError):
             email_agent._extract_json("Here is your answer: {}", "copilot")
 
     def test_unescaped_newlines_inside_model_json_strings_are_repaired(self) -> None:
         raw = (
-            '{"text":"line one\nline two",'
-            '"html":"<p>line one\nline two</p>",'
-            '"evidence_paths":["daily.steps"],"artifacts":[]}'
+            '{"text":"grounded reply",'
+            '"html":"<p>grounded reply</p>",'
+            '"evidence_paths":["daily.st\neps"],"artifacts":[]}'
         )
         parsed = email_agent._extract_json(raw, "copilot")
-        self.assertEqual("line one\nline two", parsed["text"])
+        validated = email_agent._validate_output(
+            parsed,
+            "copilot",
+            {"daily": {"steps": 10000}},
+        )
+        self.assertEqual(("daily.steps",), validated["evidence_paths"])
 
     def test_line_wrapped_known_keys_and_paths_are_repaired(self) -> None:
         raw = (
-            '{"text":"ok","html":"<p>ok</p>",'
+            '{"text":"grounded reply",'
+            '"html":"<p>grounded reply</p>",'
             '"evi\ndence_paths":["daily.st\neps"],"artifacts":[]}'
         )
         parsed = email_agent._extract_json(raw, "copilot")
@@ -286,15 +397,12 @@ class EmailAgentArtifactTests(unittest.TestCase):
     def test_draft_retries_one_rejected_provider_output(self) -> None:
         requests: list[dict] = []
 
-        def adapter(root: Path) -> str:
+        def adapter(root: Path, **kwargs) -> str:
             requests.append(json.loads(
                 (root / "work" / "request.json").read_text(encoding="utf-8")
             ))
             if len(requests) == 1:
-                return response(
-                    text="Unsupported 99999.",
-                    html="<p>Unsupported 99999.</p>",
-                )
+                return response(evidence_paths=["daily.missing"])
             return response()
 
         with (
@@ -312,16 +420,16 @@ class EmailAgentArtifactTests(unittest.TestCase):
         ):
             with email_agent.draft(turns(), now=NOW) as reply:
                 self.assertIn(
-                    "daily.steps = 10000",
+                    "Daily › Steps: 10000 [daily.steps]",
                     reply.text,
                 )
-                self.assertIn("Evidence trace", reply.html)
+                self.assertIn("FitLit grounded response", reply.html)
         self.assertEqual(2, len(requests))
         self.assertNotIn("validation_retry", requests[0])
         self.assertTrue(
             requests[1]["validation_retry"]["previous_output_discarded"]
         )
-        self.assertNotIn("99999", json.dumps(requests[1]))
+        self.assertNotIn("daily.missing", json.dumps(requests[1]))
 
     def test_draft_materializes_evidence_backed_artifacts_then_deletes_them(
         self,
@@ -329,19 +437,16 @@ class EmailAgentArtifactTests(unittest.TestCase):
         artifacts = [
             {
                 "kind": "xlsx",
-                "sheet_name": "Health",
                 "evidence_paths": ["daily.steps"],
             },
             {
                 "kind": "docx",
-                "title": "Health summary",
-                "paragraphs": ["A concise grounded overview."],
                 "evidence_paths": ["daily.steps"],
             },
         ]
         captured_request: Path | None = None
 
-        def adapter(root: Path) -> str:
+        def adapter(root: Path, **kwargs) -> str:
             nonlocal captured_request
             captured_request = root / "work" / "request.json"
             self.assertTrue(captured_request.exists())
@@ -375,12 +480,58 @@ class EmailAgentArtifactTests(unittest.TestCase):
                 self.assertEqual("daily.steps", workbook.active["A2"].value)
                 self.assertEqual(10000, workbook.active["B2"].value)
                 document = Document(paths[1])
-                self.assertEqual("Health summary", document.paragraphs[0].text)
+                self.assertEqual(
+                    "FitLit Daily Evidence",
+                    document.paragraphs[0].text,
+                )
                 self.assertEqual("daily.steps", document.tables[0].cell(1, 0).text)
                 self.assertEqual("10000", document.tables[0].cell(1, 1).text)
             self.assertTrue(all(not path.exists() for path in paths))
             self.assertIsNotNone(captured_request)
             self.assertFalse(captured_request.exists())
+
+    def test_draft_materializes_safe_html_and_png_artifacts(self) -> None:
+        artifacts = [
+            {
+                "kind": "html",
+                "evidence_paths": ["daily.steps"],
+            },
+            {
+                "kind": "png",
+                "evidence_paths": ["daily.steps"],
+            },
+        ]
+        with (
+            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
+            patch(
+                "fitlit.email_agent.build_grounding",
+                return_value={"daily": {"steps": 10000, "distance": 5}},
+            ),
+            patch.dict(
+                email_agent._ADAPTERS,
+                {
+                    "copilot": lambda root, **kwargs: response(
+                        artifacts=artifacts,
+                        evidence_paths=["daily.steps", "daily.distance"],
+                    )
+                },
+                clear=False,
+            ),
+        ):
+            with email_agent.draft(turns(), now=NOW) as reply:
+                html_attachment, png_attachment = reply.attachments
+                self.assertEqual("text/html", html_attachment.mime_type)
+                html = html_attachment.path.read_text()
+                self.assertIn("@media(max-width:600px)", html)
+                self.assertIn("max-width:720px", html)
+                self.assertIn("daily.steps", html)
+                self.assertIn("10000", html)
+                self.assertNotIn("daily.distance", html)
+                self.assertEqual("image/png", png_attachment.mime_type)
+                self.assertTrue(
+                    png_attachment.path.read_bytes().startswith(b"\x89PNG")
+                )
 
     def test_spreadsheet_formula_like_grounding_is_written_as_text(self) -> None:
         artifact = {
@@ -396,7 +547,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             self.assertEqual("Evidence path", workbook.active["A1"].value)
             self.assertTrue(workbook.active["B2"].value.startswith("'="))
 
-    def test_artifacts_reject_unsafe_text_and_uncited_paths(self) -> None:
+    def test_artifacts_reject_provider_prose_and_uncited_paths(self) -> None:
         grounding = {
             "daily": {
                 "steps": 10000,
@@ -404,15 +555,14 @@ class EmailAgentArtifactTests(unittest.TestCase):
                 "unsafe": "unsafe\u000bvalue",
             }
         }
-        unsafe_title = json.loads(response(artifacts=[{
+        provider_prose = json.loads(response(artifacts=[{
             "kind": "docx",
-            "title": "Health\u000bsummary",
-            "paragraphs": ["Grounded overview."],
+            "title": "Unsupported health conclusion",
             "evidence_paths": ["daily.steps"],
         }]))
         with self.assertRaises(email_agent.EmailAgentError):
             email_agent._validate_output(
-                unsafe_title,
+                provider_prose,
                 "copilot",
                 grounding,
             )
@@ -428,7 +578,6 @@ class EmailAgentArtifactTests(unittest.TestCase):
 
         uncited = json.loads(response(artifacts=[{
             "kind": "xlsx",
-            "sheet_name": "Health",
             "evidence_paths": ["daily.distance"],
         }]))
         with self.assertRaisesRegex(
@@ -442,7 +591,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
     ) -> None:
         captured_root: Path | None = None
 
-        def adapter(root: Path) -> str:
+        def adapter(root: Path, **kwargs) -> str:
             nonlocal captured_root
             captured_root = root
             return response()

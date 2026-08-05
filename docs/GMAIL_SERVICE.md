@@ -46,10 +46,12 @@ FitLit Ask: Show commands
 The command daemon is provider-centered rather than template-driven. It builds
 a fresh, read-only grounded snapshot from FitLit's daily, sleep, weekly,
 workout, weight, and activity summaries and gives that snapshot to the selected
-headless harness. The provider drafts qualitative plain text and safe HTML,
-selects scalar evidence paths, and chooses any requested XLSX or DOCX artifact
-type. FitLit appends the exact path/value trace and materializes the attachment
-with locally owned filenames, columns, and cells.
+headless harness. The provider writes natural conversational text, selects
+scalar evidence paths for factual health claims, and chooses any requested
+XLSX, DOCX, HTML, or PNG artifact type. FitLit appends exact path/value
+evidence, validates a strict attribute-free semantic HTML fragment, applies
+the fixed responsive FitLit theme, and owns artifact titles, labels, filenames,
+and bytes.
 
 The first successfully processed `FitLit Ask` conversation becomes the primary
 thread. After that, the daemon stops searching the mailbox and polls only that
@@ -72,12 +74,14 @@ Copilot is the default harness, using `gpt-5.6-sol` at `high` reasoning effort.
 Its run has an isolated `COPILOT_HOME`, no remote export, no MCP servers, no
 custom instructions, and only the `view` tool inside the temporary request
 directory. Codex and Claude adapters can be selected through `.env`. Provider
-output is schema-validated; unsafe HTML, non-scalar or missing evidence paths,
-provider-authored digits or number words, provider-controlled topics or
-filenames, excessive artifacts, XML-unsafe text, and spreadsheet formulas are
-rejected. Exact numeric values appear only in runtime-rendered path/value
-traces. There is no deterministic answer fallback: a provider failure is
-retried with durable backoff rather than sending an ungrounded reply.
+output is schema-validated; unsafe or malformed HTML, non-scalar or missing
+evidence paths, provider-controlled topics or filenames, excessive artifacts,
+XML-unsafe values, and spreadsheet formulas are rejected. Provider HTML cannot
+contain attributes, links, images, scripts, styles, forms, comments, embedded
+data, or remote resources. Exact grounded values and the production CSS shell
+are added by the runtime. There is no template classifier: greetings and
+normal conversation can use natural text with no evidence paths, while health
+answers include the selected evidence trace.
 Interrupted sends are first reconciled against Gmail using the immutable source
 message ID and are released for retry only after the full provider-and-delivery
 window has expired without a matching reply.
