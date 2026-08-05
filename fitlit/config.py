@@ -71,6 +71,11 @@ def _env_optional_float(name: str) -> float | None:
     return float(value) if value else None
 
 
+def _env_optional_int(name: str) -> int | None:
+    value = os.environ.get(name, "").strip()
+    return int(value) if value.isdecimal() else None
+
+
 # --------------------------------------------------------------------------- #
 # Google Health API target + auth
 # --------------------------------------------------------------------------- #
@@ -203,28 +208,44 @@ EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env(
     "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD",
     "0.20",
 )
-# Private WhatsApp self-chat bridge. Baileys keeps linked-device credentials in
-# data/state; only bounded message text crosses stdin to the shared agent.
-WHATSAPP_ENABLED = _env_bool("FITLIT_WHATSAPP_ENABLED")
-WHATSAPP_TRUSTED_USER_E164 = _env(
-    "FITLIT_WHATSAPP_TRUSTED_USER_E164",
-    "",
+# Private Telegram bot. The official Bot API is polled outbound; only the exact
+# paired numeric user ID is accepted. Complete indexed conversations persist in
+# an owner-only local database so each active thread can be supplied intact.
+TELEGRAM_ENABLED = _env_bool("FITLIT_TELEGRAM_ENABLED")
+TELEGRAM_BOT_TOKEN = _env("FITLIT_TELEGRAM_BOT_TOKEN", "").strip()
+TELEGRAM_TRUSTED_USER_ID = _env_optional_int(
+    "FITLIT_TELEGRAM_TRUSTED_USER_ID"
 )
-WHATSAPP_CONTEXT_MESSAGES = max(
-    1,
-    min(5, int(_env("FITLIT_WHATSAPP_CONTEXT_MESSAGES", "5"))),
+TELEGRAM_COPILOT_MODEL = _env(
+    "FITLIT_TELEGRAM_COPILOT_MODEL",
+    "gpt-5.6-terra",
 )
-WHATSAPP_BODY_MAX_CHARS = max(
+TELEGRAM_REASONING_EFFORT = _env(
+    "FITLIT_TELEGRAM_REASONING_EFFORT",
+    "high",
+).lower()
+TELEGRAM_BODY_MAX_CHARS = max(
     100,
-    min(10_000, int(_env("FITLIT_WHATSAPP_BODY_MAX_CHARS", "2000"))),
+    min(10_000, int(_env("FITLIT_TELEGRAM_BODY_MAX_CHARS", "2000"))),
 )
-WHATSAPP_AGENT_MAX_INPUT_BYTES = max(
-    10_000,
-    min(
-        250_000,
-        int(_env("FITLIT_WHATSAPP_AGENT_MAX_INPUT_BYTES", "50000")),
-    ),
+TELEGRAM_MESSAGE_CHUNK_CHARS = max(
+    500,
+    min(4_000, int(_env("FITLIT_TELEGRAM_MESSAGE_CHUNK_CHARS", "4000"))),
 )
+TELEGRAM_POLL_TIMEOUT_SECONDS = max(
+    5,
+    min(50, int(_env("FITLIT_TELEGRAM_POLL_TIMEOUT_SECONDS", "5"))),
+)
+TELEGRAM_REQUEST_TIMEOUT_SECONDS = max(
+    TELEGRAM_POLL_TIMEOUT_SECONDS + 5,
+    min(120, int(_env("FITLIT_TELEGRAM_REQUEST_TIMEOUT_SECONDS", "60"))),
+)
+TELEGRAM_MAX_RESPONSE_BYTES = max(
+    100_000,
+    min(5_000_000, int(_env("FITLIT_TELEGRAM_MAX_RESPONSE_BYTES", "2000000"))),
+)
+TELEGRAM_STATE_PATH = STATE_DIR / "telegram-state.json"
+TELEGRAM_TRANSCRIPT_PATH = STATE_DIR / "telegram-conversations.sqlite3"
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
 AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")

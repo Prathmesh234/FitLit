@@ -1,0 +1,22 @@
+[Unit]
+Description=FitLit private Telegram bot listener
+After=network-online.target fitlit.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__FITLIT_USER__
+WorkingDirectory=__FITLIT_ROOT__
+EnvironmentFile=-__FITLIT_ROOT__/.env
+Environment="PATH=__FITLIT_PATH__"
+UMask=0077
+ExecStart=__UV_PATH__ run python -m fitlit.telegram_service run
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
