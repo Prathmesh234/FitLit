@@ -529,6 +529,39 @@ class TelegramProcessingTests(unittest.TestCase):
             )
             self.assertEqual("replied", state.value["status"])
 
+    def test_provider_failure_preserves_history_without_false_size_claim(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            state = telegram_service.TelegramState(root / "state.json")
+            transcript = telegram_service.TelegramTranscriptStore(
+                root / "transcript.sqlite3"
+            )
+            client = FakeClient()
+            with (
+                patch("fitlit.config.TELEGRAM_TRUSTED_USER_ID", USER_ID),
+                patch(
+                    "fitlit.telegram_service.email_agent.draft",
+                    side_effect=email_agent.EmailAgentError(
+                        "copilot returned unsafe semantic HTML"
+                    ),
+                ),
+            ):
+                telegram_service.process_update(
+                    client,
+                    state,
+                    transcript,
+                    update("How was my workout yesterday?"),
+                )
+            self.assertIn(
+                "please try the question again",
+                client.texts[0][1],
+            )
+            self.assertNotIn("/new", client.texts[0][1])
+            history = transcript.history(transcript.active(USER_ID))
+            self.assertEqual(["user", "assistant"], [turn.role for turn in history])
+
     def test_delivery_resume_skips_confirmed_parts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = telegram_service.TelegramTranscriptStore(
