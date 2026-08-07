@@ -118,21 +118,23 @@ FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
 
 Copilot runs with an isolated temporary `COPILOT_HOME`, no remote export, no
-MCP servers, and only read access to its temporary request. It produces natural
-conversational text, selects scalar evidence paths for health claims, and can
-request XLSX/DOCX/HTML/PNG types. The runtime appends exact evidence values,
-renders safe HTML locally, and owns all artifact titles, filenames, labels, and
-bytes. Request files, provider state, logs, and artifacts are deleted after
-delivery.
+MCP servers, and only read access to its temporary request. It receives one
+compact `citable_evidence` map of exact `path: value` pairs chosen for the
+newest question, produces natural conversational text, copies evidence keys
+verbatim for health claims, and can request XLSX/DOCX/HTML/PNG types. The
+runtime appends exact evidence values, renders safe HTML locally, and owns all
+artifact titles, filenames, labels, and bytes. Request files, provider state,
+logs, and artifacts are deleted after delivery.
 
 The optional Telegram daemon long-polls every five seconds and stores complete
 indexed conversations in owner-only
 `data/state/telegram-conversations.sqlite3`. Each normal message supplies the
-entire active transcript to the same isolated provider with
-`**LATEST QUERY**` explicitly marked. `/new` archives the current thread and
-starts the next index without deleting history; `/reset` is disabled. Telegram
-can deliver the same XLSX/DOCX evidence plus safe HTML and locally rendered PNG
-screenshot artifacts.
+active transcript to the same isolated provider with
+`**LATEST QUERY**` explicitly marked, compacting only the provider view if the
+composed request would exceed `FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES`.
+`/new` archives the current thread and starts the next index without deleting
+history; `/reset` is disabled. Telegram can deliver the same XLSX/DOCX evidence
+plus safe HTML and locally rendered PNG screenshot artifacts.
 
 ## 5. Configure optional proactive-report AI
 
