@@ -179,6 +179,12 @@ EMAIL_AGENT_MAX_INPUT_BYTES = max(
     20_000,
     min(500_000, int(_env("FITLIT_EMAIL_AGENT_MAX_INPUT_BYTES", "100000"))),
 )
+# Headless Copilot refuses to read a request file at or above 20,480 bytes, so
+# the composed provider request is adaptively built under this smaller budget.
+EMAIL_AGENT_REQUEST_BUDGET_BYTES = max(
+    8_000,
+    min(20_479, int(_env("FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES", "18000"))),
+)
 EMAIL_AGENT_MAX_OUTPUT_CHARS = max(
     10_000,
     min(250_000, int(_env("FITLIT_EMAIL_AGENT_MAX_OUTPUT_CHARS", "120000"))),
@@ -228,6 +234,9 @@ TELEGRAM_BODY_MAX_CHARS = max(
     100,
     min(10_000, int(_env("FITLIT_TELEGRAM_BODY_MAX_CHARS", "2000"))),
 )
+# Telegram measures the 4096 sendMessage limit in UTF-16 code units, so this
+# budget is applied in UTF-16 units rather than Python characters. The name and
+# default are unchanged; astral emoji simply consume two units each.
 TELEGRAM_MESSAGE_CHUNK_CHARS = max(
     500,
     min(4_000, int(_env("FITLIT_TELEGRAM_MESSAGE_CHUNK_CHARS", "4000"))),
@@ -246,6 +255,15 @@ TELEGRAM_MAX_RESPONSE_BYTES = max(
 )
 TELEGRAM_STATE_PATH = STATE_DIR / "telegram-state.json"
 TELEGRAM_TRANSCRIPT_PATH = STATE_DIR / "telegram-conversations.sqlite3"
+# Kernel-held single-instance lock. Only one process may poll or pair at a
+# time, and the kernel releases the lock even if that process is killed.
+TELEGRAM_LOCK_PATH = STATE_DIR / "telegram-service.lock"
+# A deterministic update that keeps failing locally is quarantined after this
+# many attempts so it can never block every later message.
+TELEGRAM_POISON_ATTEMPTS = max(
+    2,
+    min(10, int(_env("FITLIT_TELEGRAM_POISON_ATTEMPTS", "3"))),
+)
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
 AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")
