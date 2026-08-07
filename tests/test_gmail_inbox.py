@@ -853,7 +853,10 @@ class InboxProcessingTests(unittest.TestCase):
             stack.enter_context(
                 patch(
                     "fitlit.gmail_inbox._discover_thread",
-                    return_value=("thread-1", [message()]),
+                    return_value=(
+                        "thread-1",
+                        [message(body="Create an XLSX spreadsheet.")],
+                    ),
                 )
             )
             stack.enter_context(
