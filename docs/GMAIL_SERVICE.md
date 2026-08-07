@@ -45,13 +45,17 @@ FitLit Ask: Show commands
 
 The command daemon is provider-centered rather than template-driven. It builds
 a fresh, read-only grounded snapshot from FitLit's daily, sleep, weekly,
-workout, weight, and activity summaries and gives that snapshot to the selected
-headless harness. The provider writes natural conversational text, selects
-scalar evidence paths for factual health claims, and chooses any requested
-XLSX, DOCX, HTML, or PNG artifact type. FitLit appends exact path/value
-evidence, validates a strict attribute-free semantic HTML fragment, applies
-the fixed responsive FitLit theme, and owns artifact titles, labels, filenames,
-and bytes.
+workout, weight, and activity summaries, then advertises it to the selected
+headless harness as one compact flat `citable_evidence` map of exact
+`path: value` pairs. The map is filtered to the domains implied by the newest
+question (sleep, training, activity, recovery, weight, or a default overview),
+always carries the Pacific date and coverage context, and excludes record
+identifiers, resource names, nulls, and generated prose. The provider writes
+natural conversational text, copies evidence keys verbatim for factual health
+claims, and chooses any requested XLSX, DOCX, HTML, or PNG artifact type.
+FitLit appends exact path/value evidence, validates a strict attribute-free
+semantic HTML fragment, applies the fixed responsive FitLit theme, and owns
+artifact titles, labels, filenames, and bytes.
 
 The first successfully processed `FitLit Ask` conversation becomes the primary
 thread. After that, the daemon stops searching the mailbox and polls only that
@@ -73,15 +77,23 @@ Gmail delivery or failure.
 Copilot is the default harness, using `gpt-5.6-sol` at `high` reasoning effort.
 Its run has an isolated `COPILOT_HOME`, no remote export, no MCP servers, no
 custom instructions, and only the `view` tool inside the temporary request
-directory. Codex and Claude adapters can be selected through `.env`. Provider
-output is schema-validated; unsafe or malformed HTML, non-scalar or missing
-evidence paths, provider-controlled topics or filenames, excessive artifacts,
-XML-unsafe values, and spreadsheet formulas are rejected. Provider HTML cannot
-contain attributes, links, images, scripts, styles, forms, comments, embedded
-data, or remote resources. Exact grounded values and the production CSS shell
-are added by the runtime. There is no template classifier: greetings and
-normal conversation can use natural text with no evidence paths, while health
-answers include the selected evidence trace.
+directory. Codex and Claude adapters can be selected through `.env`. The
+composed request is written as a single JSON file that is adaptively kept under
+`FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES` (18,000 by default, below the 20,480
+byte hard refusal of the headless reader) by first narrowing the evidence tier
+and then omitting the oldest context turns; the newest question is never
+dropped and the omission count is reported back in `context_policy`. Provider
+output is schema-validated; unsafe or malformed HTML, evidence paths outside
+`citable_evidence`, provider-controlled filenames, excessive artifacts,
+XML-unsafe values, and spreadsheet formulas are rejected, unknown top-level
+keys and any provider-supplied topic are dropped, and reply text is Unicode
+normalized with bidi, zero-width, and control characters stripped. Provider
+HTML cannot contain attributes, links, images, scripts, styles, forms,
+comments, processing instructions, embedded data, or remote resources. Exact
+grounded values and the production CSS shell are added by the runtime. There is
+no template classifier: greetings and normal conversation can use natural text
+with no evidence paths, while health answers include the selected evidence
+trace (at most twelve rows by email, six in Telegram).
 Interrupted sends are first reconciled against Gmail using the immutable source
 message ID and are released for retry only after the full provider-and-delivery
 window has expired without a matching reply.
