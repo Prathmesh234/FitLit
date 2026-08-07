@@ -1426,11 +1426,32 @@ def _grounded_reply(
                 ) as reply:
                     assistant_text = reply.text
                     parts = _reply_parts(reply)
-        except (email_agent.EmailAgentError, OSError):
+        except email_agent.EmailAgentError as exc:
+            LOG.error("Telegram headless provider failed: %s", exc)
+            if "input exceeded" in str(exc):
+                assistant_text = (
+                    "This complete conversation is too large for the headless "
+                    "provider. Use /new to begin another thread; the current "
+                    "conversation remains archived."
+                )
+            else:
+                assistant_text = (
+                    "FitLit's headless provider could not complete that reply. "
+                    "Your message and conversation history are preserved; "
+                    "please try the question again."
+                )
+            parts = [(
+                "text",
+                assistant_text.encode("utf-8"),
+                "",
+                "text/plain",
+            )]
+        except OSError:
+            LOG.error("Telegram headless provider had an operating system error.")
             assistant_text = (
-                "FitLit could not prepare the complete-history grounded reply. "
-                "Use /new if this conversation has grown beyond the provider "
-                "limit."
+                "FitLit's headless provider could not complete that reply. "
+                "Your message and conversation history are preserved; "
+                "please try the question again."
             )
             parts = [(
                 "text",
