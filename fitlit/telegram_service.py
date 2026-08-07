@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import io
 import json
 import logging
 import os
 import re
 import secrets
+import shutil
 import signal
 import sqlite3
 import sys
@@ -20,7 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, BinaryIO, Callable
+from typing import Any, BinaryIO, Callable, Iterator
 
 from fitlit import config, email_agent
 from fitlit.journal import PACIFIC
@@ -34,9 +36,48 @@ DOCUMENT_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "text/html": ".html",
+    # PNG evidence is uploaded with document semantics: Telegram compresses and
+    # dimension-checks photos, while documents keep the exact rendered bytes.
+    "image/png": ".png",
 }
+# Retained only so an outbound part staged as a photo before this change still
+# has a delivery path; new plans always stage PNG artifacts as documents.
 PHOTO_MIME_TYPES = {"image/png": ".png"}
 TYPING_REFRESH_SECONDS = 4.0
+# Telegram assigns the next update_id randomly instead of sequentially once a
+# bot has had no updates for at least a week.
+UPDATE_ID_RESET_IDLE_SECONDS = 7 * 24 * 60 * 60
+NOT_DELIVERED_PREFIX = "[NOT DELIVERED] "
+UNCERTAIN_ANNOTATION = (
+    "[Telegram delivery could not be confirmed; FitLit did not resend the "
+    "uncertain part.]"
+)
+FAILED_ANNOTATION = "[One or more Telegram delivery parts were rejected.]"
+EVIDENCE_APPENDIX_MARKER = (
+    "FitLit selected the following grounded health data"
+)
+TOO_LARGE_REPLY = (
+    "This complete conversation is too large for the headless provider. "
+    "Use /new to begin another thread; the current conversation remains "
+    "archived."
+)
+PROVIDER_FAILURE_REPLY = (
+    "FitLit's headless provider could not complete that reply. "
+    "Your message and conversation history are preserved; "
+    "please try the question again."
+)
+# Operational fallbacks are real user-visible messages, but they are FitLit
+# runtime notices rather than model output, so they are withheld from later
+# provider context without ever being deleted from the transcript.
+PROVIDER_FALLBACK_REPLIES = frozenset({
+    TOO_LARGE_REPLY,
+    PROVIDER_FAILURE_REPLY,
+})
+QUARANTINE_NOTICE = (
+    "FitLit could not process one earlier message after repeated attempts "
+    "and has skipped it to keep the channel moving. Please send that "
+    "question again if it still matters."
+)
 
 
 class TelegramError(RuntimeError):
@@ -45,6 +86,14 @@ class TelegramError(RuntimeError):
 
 class TelegramConfigError(TelegramError):
     """Telegram settings are missing or invalid."""
+
+
+class TelegramTransportError(TelegramError):
+    """Telegram could not be reached, timed out, or dropped the connection."""
+
+
+class TelegramLockedError(TelegramError):
+    """Another FitLit Telegram process holds the single-instance lock."""
 
 
 class TelegramAPIError(TelegramError):
@@ -67,6 +116,12 @@ class TelegramNotDeliveredError(TelegramError):
 def _blocking_retry_sleep(delay: float) -> bool:
     time.sleep(delay)
     return False
+
+
+def _retryable_api_error(error: TelegramAPIError) -> bool:
+    """Telegram may still accept this call later; the outcome is not final."""
+    code = error.error_code
+    return code is None or code == 429 or code >= 500
 
 
 @dataclass(frozen=True)
@@ -166,24 +221,87 @@ def _command(text: str) -> str | None:
     return first.split("@", 1)[0].lower()
 
 
+def model_visible_assistant_text(content: str) -> str | None:
+    """Strip runtime annotations, or return None for a FitLit-only notice.
+
+    The compact ``[NOT DELIVERED]`` marker is deliberately kept: it is the one
+    delivery fact the model must know, because the owner never saw that reply.
+    Verbose runtime appendices are removed, and operational fallbacks that
+    FitLit itself wrote are withheld entirely.
+    """
+    text = content
+    undelivered = text.startswith(NOT_DELIVERED_PREFIX)
+    if undelivered:
+        text = text[len(NOT_DELIVERED_PREFIX):]
+    for marker in (
+        EVIDENCE_APPENDIX_MARKER,
+        UNCERTAIN_ANNOTATION,
+        FAILED_ANNOTATION,
+    ):
+        index = text.find(marker)
+        if index != -1:
+            text = text[:index]
+    text = text.strip()
+    if not text or text in PROVIDER_FALLBACK_REPLIES:
+        return None
+    return NOT_DELIVERED_PREFIX + text if undelivered else text
+
+
+def utf16_units(text: str) -> int:
+    """Return Telegram's own length unit: UTF-16 code units."""
+    return sum(2 if ord(character) > 0xFFFF else 1 for character in text)
+
+
+def _utf16_prefix(text: str, budget: int) -> int:
+    """Return the longest character count whose UTF-16 length fits budget."""
+    used = 0
+    for index, character in enumerate(text):
+        width = 2 if ord(character) > 0xFFFF else 1
+        if used + width > budget:
+            return index
+        used += width
+    return len(text)
+
+
 def split_text(text: str, maximum: int) -> list[str]:
+    """Split text into chunks of at most ``maximum`` UTF-16 code units.
+
+    Telegram measures the 4096 sendMessage limit in UTF-16 code units, so an
+    astral emoji costs two units even though Python counts it as one
+    character. Paragraph, line, and word boundaries are preserved when a
+    reasonable one exists inside the budget.
+    """
+    budget = int(maximum)
+    if budget < 2:
+        raise TelegramError("Telegram chunk budget was too small")
     remaining = text.strip()
     if not remaining:
         raise TelegramError("Telegram reply text was empty")
-    chunks = []
-    while len(remaining) > maximum:
-        window = remaining[:maximum + 1]
-        split_at = max(
-            window.rfind("\n\n"),
-            window.rfind("\n"),
-            window.rfind(" "),
-        )
-        if split_at < maximum // 2:
-            split_at = maximum
-        chunks.append(remaining[:split_at].rstrip())
+    chunks: list[str] = []
+    while utf16_units(remaining) > budget:
+        cut = _utf16_prefix(remaining, budget)
+        if cut <= 0:
+            raise TelegramError("Telegram chunk budget was too small")
+        window = remaining[:cut]
+        split_at = cut
+        for boundary in ("\n\n", "\n", " "):
+            index = window.rfind(boundary)
+            if (
+                index > 0
+                and utf16_units(window[:index].rstrip()) >= budget // 2
+            ):
+                split_at = index
+                break
+        chunk = remaining[:split_at].rstrip()
+        if not chunk:
+            split_at = cut
+            chunk = window
+        chunks.append(chunk)
         remaining = remaining[split_at:].lstrip()
     if remaining:
         chunks.append(remaining)
+    if not chunks:
+        raise TelegramError("Telegram reply text was empty")
     return chunks
 
 
@@ -195,6 +313,64 @@ def _private_parent(path: Path) -> None:
     if not parent.is_dir():
         raise TelegramError("Telegram state parent is not a directory")
     parent.chmod(0o700)
+
+
+def _open_lock(path: Path) -> int:
+    if path.exists() and path.is_symlink():
+        raise TelegramError("refusing symlinked Telegram lock file")
+    _private_parent(path)
+    descriptor = os.open(path, os.O_RDWR | os.O_CREAT | os.O_CLOEXEC, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+    except OSError:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+@contextmanager
+def single_instance(purpose: str) -> Iterator[None]:
+    """Hold the exclusive Telegram lock, or refuse to start a second process.
+
+    The lock is a kernel ``flock``: it is released automatically when this
+    process exits or is killed, so a crash can never leave it stuck.
+    """
+    path = config.TELEGRAM_LOCK_PATH
+    descriptor = _open_lock(path)
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError) as exc:
+            raise TelegramLockedError(
+                "another FitLit Telegram process is already running; stop "
+                f"fitlit-telegram.service before running {purpose}"
+            ) from exc
+        try:
+            yield
+        finally:
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
+
+
+def listener_running() -> bool:
+    """Probe the single-instance lock without disturbing a live listener."""
+    path = config.TELEGRAM_LOCK_PATH
+    if not path.is_file():
+        return False
+    try:
+        descriptor = _open_lock(path)
+    except (OSError, TelegramError):
+        return False
+    try:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except (BlockingIOError, OSError):
+            return True
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(descriptor)
 
 
 class TelegramState:
@@ -231,23 +407,30 @@ class TelegramState:
     @property
     def offset(self) -> int | None:
         value = self.value["last_update_id"]
-        return value + 1 if value >= 0 else None
+        if value < 0 or self.idle_seconds() >= UPDATE_ID_RESET_IDLE_SECONDS:
+            # Telegram may hand out a randomly chosen, possibly lower
+            # update_id after a week of silence. Confirming nothing lets the
+            # server replay whatever is genuinely pending; every processing
+            # path is idempotent, so a replayed update is harmless.
+            return None
+        return value + 1
+
+    def idle_seconds(self) -> int:
+        updated_at = self.value["updated_at"]
+        if updated_at <= 0:
+            return UPDATE_ID_RESET_IDLE_SECONDS
+        return max(0, int(time.time()) - int(updated_at))
 
     def finish(self, update_id: int, status: str) -> None:
-        if update_id < self.value["last_update_id"]:
+        if (
+            update_id < self.value["last_update_id"]
+            and self.idle_seconds() < UPDATE_ID_RESET_IDLE_SECONDS
+        ):
+            # A recent lower identifier is a stale replay, never a reset.
             return
         self.value = {
             "version": 1,
             "last_update_id": update_id,
-            "status": status,
-            "updated_at": int(time.time()),
-        }
-        self._persist()
-
-    def reset(self, status: str) -> None:
-        self.value = {
-            "version": 1,
-            "last_update_id": -1,
             "status": status,
             "updated_at": int(time.time()),
         }
@@ -306,6 +489,7 @@ class TelegramTranscriptStore:
                         REFERENCES conversations(id),
                     role TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
                     content TEXT NOT NULL,
+                    provider_content TEXT,
                     sent_at_ms INTEGER NOT NULL,
                     source_update_id INTEGER NOT NULL,
                     UNIQUE(conversation_id, role, source_update_id)
@@ -356,6 +540,12 @@ class TelegramTranscriptStore:
                     completed_at_ms INTEGER NOT NULL,
                     PRIMARY KEY(user_id, source_update_id)
                 );
+                CREATE TABLE IF NOT EXISTS update_failures (
+                    update_id INTEGER PRIMARY KEY,
+                    attempts INTEGER NOT NULL,
+                    last_error TEXT NOT NULL,
+                    first_seen_ms INTEGER NOT NULL
+                );
                 """
             )
             columns = {
@@ -370,6 +560,16 @@ class TelegramTranscriptStore:
                     ALTER TABLE outbound_replies
                     ADD COLUMN record_in_transcript INTEGER NOT NULL DEFAULT 1
                     """
+                )
+            turn_columns = {
+                str(row[1])
+                for row in connection.execute(
+                    "PRAGMA table_info(turns)"
+                ).fetchall()
+            }
+            if "provider_content" not in turn_columns:
+                connection.execute(
+                    "ALTER TABLE turns ADD COLUMN provider_content TEXT"
                 )
         self.path.chmod(0o600)
 
@@ -497,6 +697,7 @@ class TelegramTranscriptStore:
         user_id: int,
         role: str,
         content: str,
+        provider_content: str | None = None,
         sent_at_ms: int,
         source_update_id: int,
     ) -> None:
@@ -506,15 +707,17 @@ class TelegramTranscriptStore:
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO turns (
-                    conversation_id, role, content, sent_at_ms, source_update_id
+                    conversation_id, role, content, provider_content,
+                    sent_at_ms, source_update_id
                 )
-                SELECT id, ?, ?, ?, ?
+                SELECT id, ?, ?, ?, ?, ?
                 FROM conversations
                 WHERE id = ? AND user_id = ?
                 """,
                 (
                     role,
                     content,
+                    provider_content,
                     sent_at_ms,
                     source_update_id,
                     conversation.conversation_id,
@@ -563,24 +766,40 @@ class TelegramTranscriptStore:
         self,
         conversation: TelegramConversation,
     ) -> list[email_agent.ThreadTurn]:
+        """Return the model-visible view of a stored conversation.
+
+        The database keeps every byte forever. Operational FitLit notices and
+        runtime delivery/evidence annotations are withheld here so a later
+        provider turn is not conditioned on text the model never wrote.
+        """
         with self._connect() as connection:
             rows = connection.execute(
                 """
-                SELECT role, content, sent_at_ms
+                SELECT role, content, provider_content, sent_at_ms
                 FROM turns
                 WHERE conversation_id = ?
                 ORDER BY id
                 """,
                 (conversation.conversation_id,),
             ).fetchall()
-        return [
-            email_agent.ThreadTurn(
-                role=role,
-                content=content,
-                internal_date_ms=sent_at_ms,
+        turns = []
+        for role, content, provider_content, sent_at_ms in rows:
+            if role == "assistant":
+                visible = model_visible_assistant_text(
+                    provider_content or content
+                )
+                if visible is None:
+                    continue
+            else:
+                visible = content
+            turns.append(
+                email_agent.ThreadTurn(
+                    role=role,
+                    content=visible,
+                    internal_date_ms=sent_at_ms,
+                )
             )
-            for role, content, sent_at_ms in rows
-        ]
+        return turns
 
     def stats(self, user_id: int) -> tuple[int, int]:
         with self._connect() as connection:
@@ -781,43 +1000,60 @@ class TelegramTranscriptStore:
     ) -> None:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            statuses = [
-                str(row[0])
-                for row in connection.execute(
-                    """
-                    SELECT status FROM outbound_parts
-                    WHERE user_id = ? AND source_update_id = ?
-                    """,
-                    (plan.user_id, plan.source_update_id),
-                ).fetchall()
-            ]
+            parts = connection.execute(
+                """
+                SELECT status, kind, payload
+                FROM outbound_parts
+                WHERE user_id = ? AND source_update_id = ?
+                ORDER BY part_index
+                """,
+                (plan.user_id, plan.source_update_id),
+            ).fetchall()
+            statuses = [str(row[0]) for row in parts]
             if not statuses:
                 return
             if any(status in {"pending", "sending"} for status in statuses):
                 raise TelegramError("Telegram outbound reply was incomplete")
             content = plan.assistant_text
             if "uncertain" in statuses:
-                content += (
-                    "\n\n[Telegram delivery could not be confirmed; FitLit "
-                    "did not resend the uncertain part.]"
-                )
+                content += f"\n\n{UNCERTAIN_ANNOTATION}"
             elif "failed" in statuses:
-                content += (
-                    "\n\n[One or more Telegram delivery parts were rejected.]"
+                content += f"\n\n{FAILED_ANNOTATION}"
+            if "delivered" not in statuses:
+                # Nothing reached Telegram, so later model context must not
+                # assume the owner ever saw this reply.
+                content = NOT_DELIVERED_PREFIX + content
+            text_parts = [row for row in parts if str(row[1]) == "text"]
+            delivered_text = [
+                bytes(row[2]).decode("utf-8")
+                for row in text_parts
+                if str(row[0]) == "delivered"
+            ]
+            if text_parts and len(delivered_text) == len(text_parts):
+                provider_content = plan.assistant_text
+            elif delivered_text:
+                provider_content = (
+                    "\n".join(delivered_text)
+                    + "\n\n[Only part of the previous reply was delivered.]"
+                )
+            else:
+                provider_content = (
+                    "[The previous reply was not delivered to the user.]"
                 )
             if plan.record_in_transcript:
                 connection.execute(
                     """
                     INSERT OR IGNORE INTO turns (
-                        conversation_id, role, content, sent_at_ms,
-                        source_update_id
+                        conversation_id, role, content, provider_content,
+                        sent_at_ms, source_update_id
                     )
-                    SELECT id, 'assistant', ?, ?, ?
+                    SELECT id, 'assistant', ?, ?, ?, ?
                     FROM conversations
                     WHERE id = ? AND user_id = ?
                     """,
                     (
                         content,
+                        provider_content,
                         int(time.time() * 1000),
                         plan.source_update_id,
                         plan.conversation_id,
@@ -869,6 +1105,67 @@ class TelegramTranscriptStore:
                 (user_id, source_update_id),
             ).fetchone()
         return row is not None
+
+    def record_failure(self, update_id: int, last_error: str) -> int:
+        """Count one deterministic local failure and return the new total."""
+        sanitized = last_error[:120]
+        now_ms = int(time.time() * 1000)
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                """
+                INSERT INTO update_failures (
+                    update_id, attempts, last_error, first_seen_ms
+                ) VALUES (?, 1, ?, ?)
+                ON CONFLICT(update_id) DO UPDATE SET
+                    attempts = attempts + 1,
+                    last_error = excluded.last_error
+                """,
+                (update_id, sanitized, now_ms),
+            )
+            row = connection.execute(
+                "SELECT attempts FROM update_failures WHERE update_id = ?",
+                (update_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def clear_failure(self, update_id: int) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM update_failures WHERE update_id = ?",
+                (update_id,),
+            )
+
+    def failure_count(self, update_id: int) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT attempts FROM update_failures WHERE update_id = ?",
+                (update_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def quarantined_count(
+        self,
+        attempts: int = config.TELEGRAM_POISON_ATTEMPTS,
+    ) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM update_failures WHERE attempts >= ?",
+                (attempts,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
+    def pending_parts(self, user_id: int) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT COUNT(*) FROM outbound_parts
+                WHERE user_id = ?
+                    AND status IN ('pending', 'sending', 'uncertain')
+                """,
+                (user_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
 
 
 class TelegramClient:
@@ -946,7 +1243,9 @@ class TelegramClient:
                 pass
             raise TelegramAPIError(exc.code, retry_after) from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise TelegramError("Telegram Bot API is unreachable") from exc
+            raise TelegramTransportError(
+                "Telegram Bot API is unreachable"
+            ) from exc
         if len(raw) > self.max_response_bytes:
             raise TelegramError("Telegram response exceeded its size limit")
         try:
@@ -1035,7 +1334,11 @@ class TelegramClient:
         )
         if (
             not isinstance(result, list)
-            or any(not isinstance(item, dict) for item in result)
+            or any(
+                not isinstance(item, dict)
+                or _nonnegative_int(item.get("update_id")) is None
+                for item in result
+            )
         ):
             raise TelegramError("Telegram updates response was invalid")
         return result
@@ -1054,7 +1357,12 @@ class TelegramClient:
                 {
                     "chat_id": chat_id,
                     "text": chunk,
-                    "disable_web_page_preview": "true",
+                    # Documented Bot API field; disable_web_page_preview is a
+                    # legacy alias that Telegram no longer documents.
+                    "link_preview_options": json.dumps(
+                        {"is_disabled": True},
+                        separators=(",", ":"),
+                    ),
                 },
                 retry_state=retry_state,
             )
@@ -1218,23 +1526,60 @@ class TelegramClient:
         )
 
 
-def _reply_parts(reply: email_agent.AgentReply) -> list[tuple[str, bytes, str, str]]:
-    parts = [
+def _text_parts(text: str) -> list[tuple[str, bytes, str, str]]:
+    return [
         ("text", chunk.encode("utf-8"), "", "text/plain")
-        for chunk in split_text(
-            reply.text,
-            config.TELEGRAM_MESSAGE_CHUNK_CHARS,
-        )
+        for chunk in split_text(text, config.TELEGRAM_MESSAGE_CHUNK_CHARS)
     ]
+
+
+def _reply_parts(reply: email_agent.AgentReply) -> list[tuple[str, bytes, str, str]]:
+    parts = _text_parts(reply.text)
     for attachment in reply.attachments:
-        kind = "photo" if attachment.mime_type in PHOTO_MIME_TYPES else "document"
+        # Every artifact, including PNG screenshots, is uploaded as a document
+        # so Telegram keeps the exact locally rendered bytes.
         parts.append((
-            kind,
+            "document",
             attachment.path.read_bytes(),
             attachment.filename,
             attachment.mime_type,
         ))
     return parts
+
+
+def _delivery_notice(delivered: int, statuses: list[str]) -> str:
+    if "uncertain" in statuses:
+        if delivered == 0:
+            return (
+                "FitLit could not confirm whether that answer reached this "
+                "chat and did not resend it, because Telegram offers no way "
+                "to make a resend safe. Please ask again if nothing arrived."
+            )
+        return (
+            "Part of that answer could not be confirmed as delivered. FitLit "
+            "did not resend it, so some of it may be missing."
+        )
+    if delivered == 0:
+        return (
+            "FitLit could not deliver that answer. Nothing from it reached "
+            "this chat, so please ask again."
+        )
+    return (
+        "Telegram rejected part of that answer, so some of it is missing."
+    )
+
+
+def _send_delivery_notice(
+    client: TelegramClient,
+    chat_id: int,
+    delivered: int,
+    statuses: list[str],
+) -> None:
+    """Disclose an incomplete delivery without ever wedging the update."""
+    try:
+        client.send_text(chat_id, _delivery_notice(delivered, statuses))
+    except (TelegramError, OSError):
+        LOG.error("Telegram delivery notice could not be sent.")
 
 
 def _deliver_reply_plan(
@@ -1254,7 +1599,10 @@ def _deliver_reply_plan(
                     "uncertain",
                 )
             LOG.error(
-                "Telegram delivery was uncertain; the part was not resent."
+                "Telegram update %s part %s was delivery-uncertain; it was "
+                "not resent.",
+                plan.source_update_id,
+                part.part_index,
             )
             continue
         transcript.set_part_status(plan, part.part_index, "sending")
@@ -1292,15 +1640,25 @@ def _deliver_reply_plan(
                     retry_state=retry_state,
                 )
         except TelegramAPIError as exc:
-            if exc.error_code is not None and exc.error_code >= 500:
+            if _retryable_api_error(exc):
                 transcript.set_part_status(plan, part.part_index, "pending")
                 raise
             transcript.set_part_status(plan, part.part_index, "failed")
             if part.kind == "text":
                 transcript.fail_remaining(plan)
-                LOG.error("Telegram permanently rejected the reply text.")
+                LOG.error(
+                    "Telegram update %s had its reply text permanently "
+                    "rejected with status %s.",
+                    plan.source_update_id,
+                    exc.error_code,
+                )
                 break
-            LOG.error("Telegram permanently rejected one reply artifact.")
+            LOG.error(
+                "Telegram update %s had one reply artifact permanently "
+                "rejected with status %s; delivery continues.",
+                plan.source_update_id,
+                exc.error_code,
+            )
         except TelegramNotDeliveredError:
             transcript.set_part_status(plan, part.part_index, "pending")
             raise
@@ -1313,7 +1671,20 @@ def _deliver_reply_plan(
                 "delivered",
                 telegram_message_id=message_id,
             )
+    final = transcript.reply_plan(plan.user_id, plan.source_update_id) or plan
+    statuses = [item.status for item in final.parts]
+    delivered = statuses.count("delivered")
+    incomplete = any(status in {"failed", "uncertain"} for status in statuses)
+    if incomplete:
+        LOG.error(
+            "Telegram update %s completed with %s of %s parts delivered.",
+            plan.source_update_id,
+            delivered,
+            len(statuses),
+        )
     transcript.complete_reply(plan)
+    if incomplete:
+        _send_delivery_notice(client, chat_id, delivered, statuses)
 
 
 def _deliver_fixed_text(
@@ -1338,13 +1709,7 @@ def _deliver_fixed_text(
             user_id=inbound.user_id,
             source_update_id=inbound.update_id,
             assistant_text=text,
-            parts=[
-                ("text", chunk.encode("utf-8"), "", "text/plain")
-                for chunk in split_text(
-                    text,
-                    config.TELEGRAM_MESSAGE_CHUNK_CHARS,
-                )
-            ],
+            parts=_text_parts(text),
             record_in_transcript=False,
         )
     _deliver_reply_plan(client, transcript, inbound.chat_id, plan)
@@ -1426,39 +1791,25 @@ def _grounded_reply(
                 ) as reply:
                     assistant_text = reply.text
                     parts = _reply_parts(reply)
+        except email_agent.EmailAgentInputTooLargeError:
+            LOG.error(
+                "Telegram headless provider input exceeded its byte budget."
+            )
+            assistant_text = TOO_LARGE_REPLY
+            parts = _text_parts(assistant_text)
         except email_agent.EmailAgentError as exc:
             LOG.error("Telegram headless provider failed: %s", exc)
-            if "input exceeded" in str(exc):
-                assistant_text = (
-                    "This complete conversation is too large for the headless "
-                    "provider. Use /new to begin another thread; the current "
-                    "conversation remains archived."
-                )
-            else:
-                assistant_text = (
-                    "FitLit's headless provider could not complete that reply. "
-                    "Your message and conversation history are preserved; "
-                    "please try the question again."
-                )
-            parts = [(
-                "text",
-                assistant_text.encode("utf-8"),
-                "",
-                "text/plain",
-            )]
-        except OSError:
-            LOG.error("Telegram headless provider had an operating system error.")
-            assistant_text = (
-                "FitLit's headless provider could not complete that reply. "
-                "Your message and conversation history are preserved; "
-                "please try the question again."
+            assistant_text = PROVIDER_FAILURE_REPLY
+            parts = _text_parts(assistant_text)
+        except (OSError, TelegramError) as exc:
+            # A local rendering, attachment, or chunking fault must degrade to
+            # a safe reply instead of retrying the same update forever.
+            LOG.error(
+                "Telegram reply plan could not be built: %s",
+                type(exc).__name__,
             )
-            parts = [(
-                "text",
-                assistant_text.encode("utf-8"),
-                "",
-                "text/plain",
-            )]
+            assistant_text = PROVIDER_FAILURE_REPLY
+            parts = _text_parts(assistant_text)
         plan = transcript.prepare_reply(
             conversation,
             user_id=inbound.user_id,
@@ -1474,7 +1825,8 @@ def process_update(
     state: TelegramState,
     transcript: TelegramTranscriptStore,
     update: dict[str, Any],
-) -> None:
+) -> str:
+    """Handle exactly one update and return its recorded outcome."""
     update_id = _update_id(update)
     inbound = parse_inbound(update)
     if (
@@ -1482,7 +1834,7 @@ def process_update(
         or inbound.user_id != config.TELEGRAM_TRUSTED_USER_ID
     ):
         state.finish(update_id, "ignored")
-        return
+        return "ignored"
     if inbound.text is None:
         _deliver_fixed_text(
             client,
@@ -1491,7 +1843,7 @@ def process_update(
             "FitLit currently accepts text messages and sends evidence files.",
         )
         state.finish(update_id, "unsupported")
-        return
+        return "unsupported"
     if (
         "\x00" in inbound.text
         or len(inbound.text) > config.TELEGRAM_BODY_MAX_CHARS
@@ -1503,7 +1855,7 @@ def process_update(
             "That message is too long for the private FitLit channel.",
         )
         state.finish(update_id, "too-long")
-        return
+        return "too-long"
     command = _command(inbound.text)
     if command in {"/start", "/help", "/pair"}:
         _deliver_fixed_text(
@@ -1516,7 +1868,7 @@ def process_update(
             ),
         )
         state.finish(update_id, "command")
-        return
+        return "command"
     if command == "/reset":
         _deliver_fixed_text(
             client,
@@ -1525,7 +1877,7 @@ def process_update(
             "Reset is disabled because transcripts are never deleted. Use /new.",
         )
         state.finish(update_id, "reset-disabled")
-        return
+        return "reset-disabled"
     if command == "/new":
         conversation = transcript.start_new(inbound.user_id, update_id)
         _deliver_fixed_text(
@@ -1539,11 +1891,127 @@ def process_update(
             conversation=conversation,
         )
         state.finish(update_id, "new-conversation")
-        return
+        return "new-conversation"
     _grounded_reply(client, inbound, transcript)
     state.finish(update_id, "replied")
-    LOG.info("Processed one trusted Telegram message.")
+    return "replied"
 
+
+def _transient_failure(error: BaseException) -> bool:
+    """True when retrying the same update later can still succeed."""
+    if isinstance(error, (TelegramTransportError, TelegramNotDeliveredError)):
+        return True
+    if isinstance(error, TelegramAPIError):
+        return _retryable_api_error(error)
+    if isinstance(error, sqlite3.OperationalError):
+        return True
+    # State-file and other filesystem faults are environmental, not poison.
+    return isinstance(error, OSError)
+
+
+def _sanitized_failure(error: BaseException) -> str:
+    """Describe a failure with no message body, user identity, or payload."""
+    if isinstance(error, TelegramAPIError):
+        return f"TelegramAPIError:{error.error_code}"
+    return type(error).__name__[:120]
+
+
+def _quarantine_update(
+    client: TelegramClient,
+    state: TelegramState,
+    transcript: TelegramTranscriptStore,
+    update_id: int,
+    attempts: int,
+) -> None:
+    """Give up on one poison update so later updates stop being blocked."""
+    # Persist the advancing offset first. If this fails, no user-visible notice
+    # is emitted and the retry remains idempotent.
+    state.finish(update_id, "quarantined")
+    user_id = config.TELEGRAM_TRUSTED_USER_ID
+    if user_id is not None:
+        try:
+            client.send_text(user_id, QUARANTINE_NOTICE)
+        except (TelegramError, OSError):
+            LOG.error("Telegram quarantine notice could not be sent.")
+        try:
+            transcript.discard_reply(user_id, update_id)
+        except sqlite3.Error:
+            LOG.error("Telegram quarantined reply could not be discarded.")
+    LOG.error(
+        "Telegram update %s was quarantined after %s failed attempts.",
+        update_id,
+        attempts,
+    )
+
+
+def _process_with_quarantine(
+    client: TelegramClient,
+    state: TelegramState,
+    transcript: TelegramTranscriptStore,
+    update: dict[str, Any],
+) -> str:
+    """Run one update, bounding deterministic failures so none can block."""
+    update_id = _update_id(update)
+    started = time.monotonic()
+    try:
+        outcome = process_update(client, state, transcript, update)
+    except Exception as exc:
+        elapsed = time.monotonic() - started
+        if _transient_failure(exc):
+            LOG.error(
+                "Telegram update %s hit a transient failure (%s) after "
+                "%.2f seconds; it keeps its full retry budget.",
+                update_id,
+                _sanitized_failure(exc),
+                elapsed,
+            )
+            raise
+        try:
+            attempts = transcript.record_failure(
+                update_id,
+                _sanitized_failure(exc),
+            )
+        except sqlite3.Error:
+            # The quarantine ledger itself is unavailable, so this attempt is
+            # environmental: keep the retry budget and let the loop back off.
+            LOG.error(
+                "Telegram update %s could not record its failure; treating "
+                "the attempt as transient.",
+                update_id,
+            )
+            raise
+        LOG.error(
+            "Telegram update %s failed locally (%s), attempt %s of %s, "
+            "after %.2f seconds.",
+            update_id,
+            _sanitized_failure(exc),
+            attempts,
+            config.TELEGRAM_POISON_ATTEMPTS,
+            elapsed,
+        )
+        if attempts < config.TELEGRAM_POISON_ATTEMPTS:
+            if isinstance(exc, TelegramError):
+                raise
+            raise TelegramError(
+                "Telegram update processing failed"
+            ) from exc
+        _quarantine_update(client, state, transcript, update_id, attempts)
+        return "quarantined"
+    try:
+        transcript.clear_failure(update_id)
+    except sqlite3.Error:
+        # The update really did succeed; a stale ledger row is harmless.
+        LOG.error(
+            "Telegram update %s could not clear its failure record.",
+            update_id,
+        )
+    LOG.info(
+        "Telegram update %s finished as %s in %.2f seconds.",
+        update_id,
+        outcome,
+        time.monotonic() - started,
+    )
+    return outcome
 
 def _update_env(values: dict[str, str]) -> None:
     path = config.BASE_DIR / ".env"
@@ -1581,7 +2049,23 @@ def _update_env(values: dict[str, str]) -> None:
 
 
 def pair(client: TelegramClient) -> int:
+    """Bind one numeric user ID while no listener owns the update stream."""
+    if (
+        config.TELEGRAM_ENABLED
+        or config.TELEGRAM_TRUSTED_USER_ID is not None
+    ):
+        raise TelegramConfigError(
+            "Telegram is already paired; rotate the bot token without "
+            "re-pairing, or explicitly clear the pairing configuration first"
+        )
+    with single_instance("pairing"):
+        return _pair(client)
+
+
+def _pair(client: TelegramClient) -> int:
     identity = client.get_me()
+    # Before the first trusted user is established, queued updates have no
+    # authenticated owner and are deliberately discarded.
     client.delete_webhook(drop_pending_updates=True)
     username = identity.get("username")
     destination = f"@{username}" if isinstance(username, str) else "your bot"
@@ -1591,8 +2075,9 @@ def pair(client: TelegramClient) -> int:
     print("Waiting up to five minutes...")
     deadline = time.monotonic() + 300
     state = TelegramState()
-    state.reset("pairing")
-    offset = None
+    # The persisted offset is only ever advanced here, never rewound, so
+    # pairing cannot replay or skip anything the listener already handled.
+    offset = state.offset
     expected = f"/pair {code}"
     while time.monotonic() < deadline:
         timeout = max(1, min(20, int(deadline - time.monotonic())))
@@ -1605,8 +2090,8 @@ def pair(client: TelegramClient) -> int:
             offset = update_id + 1
             inbound = parse_inbound(update)
             if inbound is not None and secrets.compare_digest(
-                inbound.text or "",
-                expected,
+                (inbound.text or "").encode("utf-8"),
+                expected.encode("utf-8"),
             ):
                 _update_env({
                     "FITLIT_TELEGRAM_TRUSTED_USER_ID": str(inbound.user_id),
@@ -1653,7 +2138,57 @@ def _initialize(
     return False
 
 
+def _telegram_model() -> str | None:
+    return (
+        config.TELEGRAM_COPILOT_MODEL
+        if config.EMAIL_AGENT_PROVIDER == "copilot"
+        else None
+    )
+
+
+def provider_installed() -> bool:
+    provider = config.EMAIL_AGENT_PROVIDER
+    return (
+        provider in email_agent.PROVIDERS
+        and bool(shutil.which(provider))
+    )
+
+
+def model_valid() -> bool:
+    model = _telegram_model()
+    # email_agent applies exactly this pattern before it ever builds a command
+    # line; reuse it rather than re-implementing provider argument validation.
+    return model is None or bool(
+        email_agent._MODEL_PATTERN.fullmatch(model)
+    )
+
+
+def effort_valid() -> bool:
+    return config.TELEGRAM_REASONING_EFFORT in email_agent._REASONING_EFFORTS
+
+
+def _validate_agent_settings() -> None:
+    """Fail fast before polling rather than once per delivered question."""
+    if config.EMAIL_AGENT_PROVIDER not in email_agent.PROVIDERS:
+        raise TelegramConfigError(
+            "FITLIT_EMAIL_AGENT_PROVIDER is not a supported provider"
+        )
+    if not provider_installed():
+        raise TelegramConfigError(
+            "the configured headless provider is not installed"
+        )
+    if not model_valid():
+        raise TelegramConfigError(
+            "FITLIT_TELEGRAM_COPILOT_MODEL has an invalid format"
+        )
+    if not effort_valid():
+        raise TelegramConfigError(
+            "FITLIT_TELEGRAM_REASONING_EFFORT is not a supported effort"
+        )
+
+
 def run(client: TelegramClient) -> int:
+    """Poll Telegram for the paired owner under an exclusive instance lock."""
     if not config.TELEGRAM_ENABLED:
         raise TelegramConfigError("FITLIT_TELEGRAM_ENABLED must be true")
     if (
@@ -1661,6 +2196,12 @@ def run(client: TelegramClient) -> int:
         or config.TELEGRAM_TRUSTED_USER_ID <= 0
     ):
         raise TelegramConfigError("Telegram trusted user is not configured")
+    _validate_agent_settings()
+    with single_instance("the listener"):
+        return _run(client)
+
+
+def _run(client: TelegramClient) -> int:
     state = TelegramState()
     transcript = TelegramTranscriptStore()
     stopping = threading.Event()
@@ -1689,34 +2230,107 @@ def run(client: TelegramClient) -> int:
                 limit=1,
             )
             if updates:
-                process_update(client, state, transcript, updates[0])
+                _process_with_quarantine(client, state, transcript, updates[0])
             backoff = 2
         except TelegramAPIError as exc:
+            if exc.error_code == 401:
+                # Only 401 proves the token itself is rejected. Exiting with
+                # EX_CONFIG stops the restart loop instead of hammering
+                # Telegram with a credential it will never accept.
+                raise TelegramConfigError(
+                    "Telegram rejected the configured bot token"
+                ) from exc
             if exc.error_code == 409:
                 LOG.error(
-                    "Telegram polling conflict; stop other bot pollers or webhooks."
+                    "Telegram polling conflict (409); stop other bot pollers "
+                    "or webhooks. Retrying in %s seconds.",
+                    _retry_delay(exc, backoff),
                 )
             else:
-                LOG.error("Telegram API request failed; retrying.")
+                # A 403 here can mean many things (chat blocked, restricted
+                # method), so it is never treated as an invalid token.
+                LOG.error(
+                    "Telegram API request failed with status %s; retrying in "
+                    "%s seconds.",
+                    exc.error_code,
+                    _retry_delay(exc, backoff),
+                )
             stopping.wait(_retry_delay(exc, backoff))
             backoff = min(60, backoff * 2)
-        except TelegramError:
-            LOG.error("Telegram transport or response failed; retrying.")
-            stopping.wait(backoff)
+        except TelegramError as exc:
+            # TelegramError messages are fixed operational strings, never
+            # message bodies or identities.
+            delay = _retry_delay(None, backoff)
+            LOG.error(
+                "Telegram transport or response failed: %s (%s); retrying in "
+                "%s seconds.",
+                exc,
+                _sanitized_failure(exc),
+                delay,
+            )
+            stopping.wait(delay)
+            backoff = min(60, backoff * 2)
+        except Exception as exc:
+            # Last resort: an unexpected defect must not end the listener,
+            # because a dead daemon delivers nothing at all.
+            delay = _retry_delay(None, backoff)
+            LOG.exception(
+                "Telegram listener hit an unexpected failure (%s); retrying "
+                "in %s seconds.",
+                _sanitized_failure(exc),
+                delay,
+            )
+            stopping.wait(delay)
             backoff = min(60, backoff * 2)
     return 0
+
+
+def _state_snapshot() -> dict[str, Any]:
+    if not config.TELEGRAM_STATE_PATH.is_file():
+        return {
+            "last_update_id": None,
+            "last_outcome": None,
+            "last_update_at": None,
+            "seconds_since_last_update": None,
+        }
+    try:
+        state = TelegramState()
+    except TelegramError:
+        return {
+            "last_update_id": None,
+            "last_outcome": "unreadable",
+            "last_update_at": None,
+            "seconds_since_last_update": None,
+        }
+    updated_at = int(state.value["updated_at"])
+    last_update_id = int(state.value["last_update_id"])
+    return {
+        "last_update_id": last_update_id if last_update_id >= 0 else None,
+        "last_outcome": str(state.value["status"]),
+        "last_update_at": (
+            datetime.fromtimestamp(updated_at, PACIFIC).isoformat()
+            if updated_at > 0
+            else None
+        ),
+        "seconds_since_last_update": (
+            state.idle_seconds() if updated_at > 0 else None
+        ),
+    }
 
 
 def status() -> int:
     conversations = 0
     turns = 0
+    pending_parts = 0
+    quarantined = 0
     if (
         config.TELEGRAM_TRUSTED_USER_ID is not None
         and config.TELEGRAM_TRANSCRIPT_PATH.is_file()
     ):
-        conversations, turns = TelegramTranscriptStore().stats(
-            config.TELEGRAM_TRUSTED_USER_ID
-        )
+        store = TelegramTranscriptStore()
+        conversations, turns = store.stats(config.TELEGRAM_TRUSTED_USER_ID)
+        pending_parts = store.pending_parts(config.TELEGRAM_TRUSTED_USER_ID)
+        quarantined = store.quarantined_count()
     print(json.dumps({
         "enabled": config.TELEGRAM_ENABLED,
         "bot_token_configured": bool(config.TELEGRAM_BOT_TOKEN),
@@ -1725,17 +2339,21 @@ def status() -> int:
         ),
         "state_exists": config.TELEGRAM_STATE_PATH.is_file(),
         "transcript_exists": config.TELEGRAM_TRANSCRIPT_PATH.is_file(),
+        "listener_running": listener_running(),
         "conversation_count": conversations,
         "turn_count": turns,
+        "pending_outbound_parts": pending_parts,
+        "quarantined_updates": quarantined,
         "context_policy": "complete-active-conversation",
         "poll_seconds": config.TELEGRAM_POLL_TIMEOUT_SECONDS,
         "provider": config.EMAIL_AGENT_PROVIDER,
-        "model": email_agent.selected_model(
-            config.TELEGRAM_COPILOT_MODEL
-            if config.EMAIL_AGENT_PROVIDER == "copilot"
-            else None
-        ),
+        "provider_installed": provider_installed(),
+        "model": email_agent.selected_model(_telegram_model()),
+        "model_valid": model_valid(),
         "reasoning_effort": config.TELEGRAM_REASONING_EFFORT,
+        "effort_valid": effort_valid(),
+        "timezone": "America/Los_Angeles",
+        **_state_snapshot(),
     }, indent=2))
     return 0
 
