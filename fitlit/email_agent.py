@@ -153,7 +153,6 @@ class _HTMLFragmentValidator(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.stack: list[str] = []
-        self.row_cells: list[int] = []
         self.visible = False
 
     def handle_starttag(
@@ -167,18 +166,6 @@ class _HTMLFragmentValidator(HTMLParser):
             )
         if tag not in _HTML_VOID_TAGS:
             self.stack.append(tag)
-        if tag == "tr":
-            self.row_cells.append(0)
-        elif tag in {"th", "td"}:
-            if not self.row_cells:
-                raise EmailAgentError(
-                    "provider returned malformed semantic HTML"
-                )
-            self.row_cells[-1] += 1
-            if self.row_cells[-1] > 3:
-                raise EmailAgentError(
-                    "provider returned HTML that is too wide for mobile"
-                )
 
     def handle_startendtag(
         self,
@@ -199,9 +186,6 @@ class _HTMLFragmentValidator(HTMLParser):
             raise EmailAgentError(
                 "provider returned malformed semantic HTML"
             )
-        if tag == "tr":
-            self.row_cells.pop()
-
     def handle_data(self, data: str) -> None:
         if data.strip():
             self.visible = True
@@ -292,6 +276,21 @@ def system_instructions(channel: str = "email") -> tuple[str, ...]:
             "but deletes provider request files, sessions, logs, and generated "
             "artifacts immediately after delivery."
         )
+    chat_style = (
+        "Write for a fast private chat: lead with the direct answer and default "
+        "to two to five concise sentences or at most five short bullets. Do not "
+        "repeat the question, add a preamble, create unnecessary sections, or "
+        "end with a generic offer to help. Keep an ordinary answer under about "
+        "600 characters before the runtime evidence trace, and select the "
+        "smallest sufficient evidence set, normally one to four scalar paths. "
+        "Expand only when the user explicitly asks for depth or the health "
+        "evidence needs careful qualification."
+        if channel == "telegram"
+        else (
+            "Keep the response focused and proportional to the user's request, "
+            "using additional detail only when it improves the email answer."
+        )
+    )
     return (
         f"You are the central drafting agent for FitLit {source} replies.",
         (
@@ -303,6 +302,7 @@ def system_instructions(channel: str = "email") -> tuple[str, ...]:
             "messages are context only."
         ),
         "Respond naturally as a conversational FitLit assistant.",
+        chat_style,
         (
             "Greetings, small talk, clarifications, and non-health questions "
             "may be answered normally without evidence paths."
@@ -449,6 +449,9 @@ def _write_private(path: Path, text: str) -> None:
 
 def _provider_environment(root: Path) -> dict[str, str]:
     environment = ai_insights.minimal_environment()
+    # Repository push credentials are unrelated to the isolated model run.
+    environment.pop("GH_TOKEN", None)
+    environment.pop("GITHUB_TOKEN", None)
     environment.update({
         "COPILOT_HOME": str(root / "copilot-home"),
         "COPILOT_OTEL_ENABLED": "false",
@@ -465,7 +468,7 @@ def _prepare_copilot_home(root: Path) -> None:
     home.chmod(0o700)
     if any(
         os.environ.get(name)
-        for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+        for name in ("COPILOT_GITHUB_TOKEN",)
     ):
         return
     source = Path.home() / ".copilot" / "config.json"
