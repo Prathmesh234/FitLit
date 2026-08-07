@@ -18,6 +18,10 @@ REQUIRED_HEALTH = (
     "GOOGLE_HEALTH_REFRESH_TOKEN",
 )
 TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
+# The listener now refuses to start when either value is malformed, so the
+# preflight checks exactly what fitlit/email_agent.py accepts.
+MODEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
+REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
 
 
 def _dotenv() -> dict[str, str]:
@@ -61,6 +65,20 @@ def collect() -> dict:
         dotenv,
         "FITLIT_TELEGRAM_TRUSTED_USER_ID",
     )
+    telegram_model = _value(
+        dotenv,
+        "FITLIT_TELEGRAM_COPILOT_MODEL",
+        "gpt-5.6-terra",
+    ) if email_provider == "copilot" else None
+    telegram_effort = _value(
+        dotenv,
+        "FITLIT_TELEGRAM_REASONING_EFFORT",
+        "high",
+    ).lower()
+    telegram_model_valid = (
+        telegram_model is None or bool(MODEL_PATTERN.fullmatch(telegram_model))
+    )
+    telegram_effort_valid = telegram_effort in REASONING_EFFORTS
     telegram_token_configured = bool(telegram_token)
     telegram_token_valid = bool(TELEGRAM_TOKEN_PATTERN.fullmatch(telegram_token))
     telegram_user_configured = bool(telegram_user)
@@ -70,6 +88,8 @@ def collect() -> dict:
     telegram_ready = all((
         telegram_token_valid,
         telegram_user_valid,
+        telegram_model_valid,
+        telegram_effort_valid,
         providers.get(email_provider, False),
     ))
     return {
@@ -124,18 +144,14 @@ def collect() -> dict:
             "bot_token_format_valid": telegram_token_valid,
             "trusted_user_configured": telegram_user_configured,
             "trusted_user_valid": telegram_user_valid,
+            "provider_installed": providers.get(email_provider, False),
             "context_policy": "complete-active-conversation",
             "transcript_path": "data/state/telegram-conversations.sqlite3",
-            "model": _value(
-                dotenv,
-                "FITLIT_TELEGRAM_COPILOT_MODEL",
-                "gpt-5.6-terra",
-            ) if email_provider == "copilot" else None,
-            "reasoning_effort": _value(
-                dotenv,
-                "FITLIT_TELEGRAM_REASONING_EFFORT",
-                "high",
-            ),
+            "lock_path": "data/state/telegram-service.lock",
+            "model": telegram_model,
+            "model_valid": telegram_model_valid,
+            "reasoning_effort": telegram_effort,
+            "effort_valid": telegram_effort_valid,
             "long_poll_seconds": int(_value(
                 dotenv,
                 "FITLIT_TELEGRAM_POLL_TIMEOUT_SECONDS",
