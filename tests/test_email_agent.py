@@ -106,6 +106,13 @@ class EmailAgentRequestTests(unittest.TestCase):
             "owner-only Telegram conversation transcript",
             " ".join(request["system_instructions"]),
         )
+        instructions = " ".join(request["system_instructions"]).lower()
+        self.assertIn("two to five concise sentences", instructions)
+        self.assertIn("at most five short bullets", instructions)
+        self.assertIn("do not repeat the question", instructions)
+        self.assertIn("under about 600 characters", instructions)
+        self.assertIn("normally one to four scalar paths", instructions)
+        self.assertIn("expand only when the user explicitly asks", instructions)
 
     def test_latest_bounded_turn_must_be_user_authored(self) -> None:
         values = [
@@ -164,10 +171,6 @@ class EmailAgentRequestTests(unittest.TestCase):
             "<script>alert(1)</script>",
             "<a href=\"https://example.invalid\">remote</a>",
             "<!-- hidden --><p>content</p>",
-            (
-                "<table><tr><td>1</td><td>2</td><td>3</td>"
-                "<td>4</td></tr></table>"
-            ),
         )
         for fragment in unsafe_fragments:
             with self.subTest(fragment=fragment):
@@ -177,6 +180,20 @@ class EmailAgentRequestTests(unittest.TestCase):
                         "copilot",
                         grounding,
                     )
+
+    def test_wide_provider_table_is_contained_in_mobile_scroller(self) -> None:
+        grounding = {"daily": {"steps": 10000}}
+        value = json.loads(response(html=(
+            "<table><tr><td>1</td><td>2</td><td>3</td>"
+            "<td>4</td></tr></table>"
+        )))
+        validated = email_agent._validate_output(value, "copilot", grounding)
+        rendered = email_agent._render_reply_html(
+            validated["html"],
+            validated["evidence_rows"],
+        )
+        self.assertIn("overflow-x:auto", rendered)
+        self.assertIn("@media(max-width:600px)", rendered)
 
     def test_natural_conversation_can_have_no_evidence(self) -> None:
         grounding = {"daily": {"steps": 10000}}
@@ -240,15 +257,41 @@ class EmailAgentRequestTests(unittest.TestCase):
                 "GMAIL_REFRESH_TOKEN": "private",
                 "GOOGLE_HEALTH_CLIENT_SECRET": "private",
                 "COPILOT_GITHUB_TOKEN": "provider",
+                "GH_TOKEN": "repository-push-token",
+                "GITHUB_TOKEN": "repository-token",
             },
             clear=True,
         ):
             environment = email_agent._provider_environment(Path("/tmp/agent"))
         self.assertNotIn("GMAIL_REFRESH_TOKEN", environment)
         self.assertNotIn("GOOGLE_HEALTH_CLIENT_SECRET", environment)
+        self.assertNotIn("GH_TOKEN", environment)
+        self.assertNotIn("GITHUB_TOKEN", environment)
         self.assertEqual("provider", environment["COPILOT_GITHUB_TOKEN"])
         self.assertEqual("false", environment["COPILOT_OTEL_ENABLED"])
         self.assertEqual("/tmp/agent/copilot-home", environment["COPILOT_HOME"])
+
+    def test_repository_token_does_not_replace_copilot_authentication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "agent"
+            root.mkdir()
+            with (
+                patch.dict(
+                    "os.environ",
+                    {"GH_TOKEN": "repository-push-token"},
+                    clear=True,
+                ),
+                patch.object(
+                    Path,
+                    "home",
+                    return_value=Path(directory) / "home",
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    email_agent.EmailAgentError,
+                    "Copilot is not authenticated",
+                ):
+                    email_agent._prepare_copilot_home(root)
 
 
 class EmailAgentProviderTests(unittest.TestCase):
