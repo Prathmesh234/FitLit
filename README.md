@@ -194,11 +194,13 @@ The first successful command thread becomes the only chain polled afterward.
 Only its latest five messages are exposed in-memory to the selected headless
 provider, with the newest user turn authoritative; unrelated mail and older
 thread content are excluded. Copilot is the default harness using GPT-5.6 Sol
-at high reasoning effort. It produces natural conversational text, selects
-scalar evidence paths for health claims, and requests artifact types when
-needed. The runtime appends exact path/value evidence and deterministically
-wraps a strictly validated semantic fragment in the fixed responsive FitLit
-theme, plus evidence-only XLSX, DOCX, HTML, or PNG artifacts.
+at high reasoning effort. It receives one compact query-filtered
+`citable_evidence` map of exact `path: value` pairs, produces natural
+conversational text, copies evidence keys verbatim for health claims, and
+requests artifact types when needed. The runtime appends exact path/value
+evidence and deterministically wraps a strictly validated semantic fragment in
+the fixed responsive FitLit theme, plus evidence-only XLSX, DOCX, HTML, or PNG
+artifacts.
 Temporary provider state and artifacts are deleted after delivery, and email
 bodies are never stored in SQLite.
 
@@ -208,16 +210,18 @@ An optional official Telegram Bot API channel provides the same grounded agent
 in a private bot chat with no public webhook. A one-time random pairing command
 binds one exact numeric Telegram user ID; all other users and non-private chats
 are silently ignored. The daemon persists complete owner-only indexed
-conversations and supplies the full active transcript with an explicit
-`**LATEST QUERY**` marker to the isolated headless provider. `/new` archives
-the current thread without deleting it; `/reset` is disabled. Copilot still
-defaults to GPT-5.6 Sol at high reasoning effort, and evidence-only XLSX, DOCX,
-safe themed HTML, and locally rendered PNG screenshot results can be delivered.
-Official Bot API long polling returns immediately on message arrival, while a
-typing heartbeat covers provider generation time; no WebSocket or public
-webhook is required for this single-user deployment. Telegram uses GPT-5.6
-Terra at high reasoning effort independently from Gmail, and all HTML uses the
-same mobile-first FitLit email theme.
+conversations and supplies the active transcript with an explicit
+`**LATEST QUERY**` marker to the isolated headless provider, compacting only
+that provider view when the composed request would exceed the byte budget.
+`/new` archives the current thread without deleting it; `/reset` is disabled.
+Copilot still defaults to GPT-5.6 Sol at high reasoning effort, and
+evidence-only XLSX, DOCX, safe themed HTML, and locally rendered PNG screenshot
+results can be delivered. Official Bot API long polling returns immediately on
+message arrival, while a typing heartbeat covers provider generation time; no
+WebSocket or public webhook is required for this single-user deployment.
+Telegram uses GPT-5.6 Terra at high reasoning effort independently from Gmail,
+plain text replies never depend on provider HTML, and any HTML artifact uses
+the same mobile-first FitLit email theme.
 Setup, privacy boundaries, pairing, and operating commands are in
 [`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md).
 
