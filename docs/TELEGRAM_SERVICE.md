@@ -26,12 +26,19 @@ certificate.
   newest question cannot fit does FitLit ask the user to start `/new` while
   preserving the archived conversation.
 - The provider writes natural conversational text for greetings, follow-ups,
-  clarifications, and health questions. Health claims cite evidence keys copied
-  verbatim from `citable_evidence`; FitLit appends their exact local values and
-  keeps at most six evidence rows per chat reply. Telegram replies are plain
-  text, so the semantic HTML fragment is optional: when it is missing,
-  malformed, or unsafe the runtime renders escaped semantic paragraphs from the
-  validated text instead of discarding the answer. A valid fragment is still
+  clarifications, and health questions. Health analyses lead with the bottom
+  line and normally add two to four concrete insights instead of stopping at a
+  metric list. Exercise evidence includes normalized Fitbit pace, speed,
+  cadence, calorie rate, heart-rate-zone time, GPS status, and splits when the
+  source record contains them. Health claims cite keys copied verbatim from
+  `citable_evidence`; FitLit appends up to ten exact values in a compact
+  `Ground truth (Fitbit)` list with human labels and units, while internal path
+  names stay hidden from the chat. Provider hard-wraps inside sentences are
+  collapsed while real paragraphs and list items remain intact. Telegram
+  replies are plain text, so the semantic HTML fragment is optional: when it is
+  missing, malformed, or unsafe the runtime renders escaped semantic paragraphs
+  from the validated text instead of discarding the answer. A valid fragment is
+  still
   used for a requested HTML artifact, is checked against a strict structural-tag
   allowlist, and is wrapped in the fixed responsive production theme. All
   artifact titles, labels, filenames, and bytes are rendered locally. Links,
