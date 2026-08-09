@@ -139,6 +139,58 @@ def sample_catalog() -> dict:
 
 
 class WeeklyCatalogTests(unittest.TestCase):
+    def test_exercise_details_preserve_fitbit_pace_zones_and_splits(self) -> None:
+        details = weekly_catalog._exercise_details(
+            {
+                "metricsSummary": {
+                    "averagePaceSecondsPerMeter": 0.356824,
+                    "heartRateZoneDurations": {
+                        "lightTime": "0s",
+                        "moderateTime": "0s",
+                        "vigorousTime": "420s",
+                        "peakTime": "1080s",
+                    },
+                },
+                "exerciseMetadata": {"hasGps": True},
+                "splits": [
+                    {
+                        "activeDuration": "496.874s",
+                        "metricsSummary": {
+                            "distanceMillimeters": 1_609_344,
+                            "averagePaceSecondsPerMeter": 0.308743,
+                        },
+                    },
+                    {
+                        "activeDuration": "640.042s",
+                        "metricsSummary": {
+                            "distanceMillimeters": 1_609_344,
+                            "averagePaceSecondsPerMeter": 0.397704,
+                        },
+                    },
+                ],
+            },
+            active_seconds=1504,
+            calories=373,
+            distance_km=4.214961,
+            steps=3889,
+        )
+        self.assertEqual("5:57/km", details["average_pace"])
+        self.assertEqual(10.1, details["avg_speed_kmh"])
+        self.assertEqual(155, details["cadence_steps_per_min"])
+        self.assertEqual(14.9, details["calories_per_min"])
+        self.assertEqual(
+            {
+                "light_min": 0.0,
+                "moderate_min": 0.0,
+                "vigorous_min": 7.0,
+                "peak_min": 18.0,
+            },
+            details["heart_rate_zones"],
+        )
+        self.assertTrue(details["has_gps"])
+        self.assertEqual("5:09/km", details["splits"][0]["average_pace"])
+        self.assertEqual("6:38/km", details["splits"][1]["average_pace"])
+
     def test_delivery_window_is_sunday_evening_with_monday_retry(self) -> None:
         sunday_early = datetime(2026, 7, 19, 19, 59, tzinfo=PACIFIC)
         sunday_due = datetime(2026, 7, 19, 20, 0, tzinfo=PACIFIC)
