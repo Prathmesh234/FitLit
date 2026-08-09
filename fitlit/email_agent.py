@@ -34,6 +34,7 @@ _TOPIC = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 _EVIDENCE_PATH = re.compile(
     r"^[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*$"
 )
+_LIST_ITEM = re.compile(r"^(?:[-*\u2022\u2013\u2014]|\d+[.)])\s+")
 _XML_INVALID = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\ud800-\udfff\ufffe\uffff]"
 )
@@ -126,7 +127,7 @@ _MAX_REPLY_TEXT_CHARS = 20000
 _MAX_REPLY_HTML_CHARS = 60000
 # Deterministic runtime evidence traces: a private chat stays readable while an
 # email can carry a wider grounded table.
-_CHAT_EVIDENCE_CAP = {"telegram": 6, "email": 12}
+_CHAT_EVIDENCE_CAP = {"telegram": 10, "email": 12}
 # Room reserved inside the request budget for one validation-retry block.
 _RETRY_RESERVE_BYTES = 700
 
@@ -348,14 +349,17 @@ def system_instructions(channel: str = "email") -> tuple[str, ...]:
         )
     )
     chat_style = (
-        "Write for a fast private chat: lead with the direct answer and default "
-        "to two to five concise sentences or at most five short bullets. Do not "
-        "repeat the question, add a preamble, create unnecessary sections, or "
-        "end with a generic offer to help. Keep an ordinary answer under about "
-        "600 characters before the runtime evidence trace, and select the "
-        "smallest sufficient evidence set, normally one to four scalar paths. "
-        "Expand only when the user explicitly asks for depth or the health "
-        "evidence needs careful qualification."
+        "Write for a polished private mobile chat: lead with the bottom line, "
+        "then give two to four concrete insights that explain what happened, "
+        "what stands out, and any important limitation. Default to three to "
+        "seven concise sentences or up to six short bullets. Do not repeat the "
+        "question, add a preamble, create unnecessary headings, or end with a "
+        "generic offer to help. Keep an ordinary answer under about 1,200 "
+        "characters before the runtime ground-truth section. For a health "
+        "analysis, normally select five to ten relevant scalar paths; use "
+        "fewer for a genuinely simple answer and expand when the user asks for "
+        "depth. Do not hard-wrap sentences; use line breaks only between real "
+        "paragraphs or list items."
         if telegram
         else (
             "Keep the response focused and proportional to the user's request, "
@@ -417,13 +421,40 @@ def system_instructions(channel: str = "email") -> tuple[str, ...]:
         (
             "citable_evidence is a flat map of evidence path to its exact local "
             "value, already selected for this query. Ground every health claim "
-            "in those values and never invent, infer, calculate, or relabel a "
-            "health metric."
+            "in those values. Never invent a health metric or derive a new "
+            "numeric value. You may compare supplied values and explain clear "
+            "relationships, using the runtime's precomputed pace, speed, "
+            "cadence, calorie-rate, heart-rate-zone, split, and trend fields "
+            "when present."
+        ),
+        (
+            "For workout, run, walk, or exercise questions, inspect the matching "
+            "session comprehensively before answering: timing, elapsed and "
+            "active duration, distance, pace, speed, cadence, steps, calories, "
+            "heart rate, heart-rate zones, splits, GPS, and nearby comparison "
+            "values. Synthesize the most useful pattern instead of merely "
+            "listing metrics. Keep facts and interpretation clearly distinct."
+        ),
+        (
+            "Fitbit active-zone minutes are weighted and can exceed elapsed or "
+            "active minutes when vigorous or peak effort receives extra credit. "
+            "Never describe that relationship alone as a data anomaly."
+        ),
+        (
+            "Prefer exact same-session evidence for a session-specific question. "
+            "Use daily, weekly, or trend values only as clearly labeled context; "
+            "never imply that a daily respiratory, recovery, or activity value "
+            "was measured inside a workout unless a supplied session path says "
+            "so."
         ),
         (
             "Copy each evidence path verbatim from a citable_evidence key. "
             "Never construct, abbreviate, repair, or guess a path. The runtime "
-            "binds each selected path to its exact value."
+            "binds each selected path to its exact value. Use the limited "
+            "evidence-path slots for the most informative numeric claims in "
+            "your answer. Prefer pace, splits, zones, cadence, recovery, and "
+            "comparison values; include day, start-time, type, or name only "
+            "when they are needed to identify or distinguish sessions."
         ),
         (
             "Every supplied timestamp is already Pacific time; report it as "
@@ -488,9 +519,9 @@ _EVIDENCE_DOMAINS: dict[str, tuple[str, ...]] = {
         "trends.sleep_14_days",
     ),
     "training": (
+        "recent_sessions",
         "daily.training",
         "weekly.training",
-        "recent_sessions",
         "daily.activity",
     ),
     "activity": (
@@ -681,6 +712,9 @@ def _flat_evidence(
         entries = list(enumerate(value))
         if list_entries is not None and len(entries) > list_entries:
             entries = entries[-list_entries:]
+        # Keep source indices stable while prioritizing the newest observations
+        # when the final citable-path cap is reached.
+        entries.reverse()
         for index, item in entries:
             _flat_evidence(
                 item,
@@ -756,14 +790,44 @@ def citable_evidence(
     prefixes = _evidence_prefixes(query)
     if not prefixes:
         return {}
-    selected = [path for path in flat if _within(path, prefixes)]
-    if not selected:
+    ordered = dict.fromkeys(
+        path for path in flat if _within(path, _EVIDENCE_ALWAYS)
+    )
+    domain_prefixes = tuple(
+        prefix for prefix in prefixes if prefix not in _EVIDENCE_ALWAYS
+    )
+    buckets: list[list[str]] = []
+    claimed = set(ordered)
+    for prefix in domain_prefixes:
+        bucket = [
+            path
+            for path in flat
+            if path not in claimed and _within(path, (prefix,))
+        ]
+        if bucket:
+            buckets.append(bucket)
+            claimed.update(bucket)
+    if not ordered and not buckets:
         # An unfamiliar snapshot shape must still advertise citable values
         # rather than leaving the provider with nothing to ground on.
-        selected = list(flat)
-    ordered = dict.fromkeys(
-        [path for path in flat if _within(path, _EVIDENCE_ALWAYS)] + selected
-    )
+        ordered = dict.fromkeys(flat)
+    else:
+        remaining = max(0, tier.maximum_paths - len(ordered))
+        quota = remaining // len(buckets) if buckets else 0
+        for bucket in buckets:
+            for path in bucket[:quota]:
+                ordered[path] = None
+        remaining = max(0, tier.maximum_paths - len(ordered))
+        if remaining:
+            for bucket in buckets:
+                for path in bucket[quota:]:
+                    if path not in ordered:
+                        ordered[path] = None
+                        remaining -= 1
+                        if remaining == 0:
+                            break
+                if remaining == 0:
+                    break
     return {
         path: flat[path]
         for path in list(ordered)[: tier.maximum_paths]
@@ -1491,6 +1555,40 @@ def _normalize_provider_text(value: str) -> str:
     )
 
 
+def _normalize_chat_layout(text: str) -> str:
+    """Collapse provider hard-wraps while preserving paragraphs and lists."""
+    rendered_blocks = []
+    for block in re.split(r"\n[ \t]*\n+", text.strip()):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if not lines:
+            continue
+        if not any(_LIST_ITEM.match(line) for line in lines):
+            rendered_blocks.append(" ".join(lines))
+            continue
+        rendered_lines: list[str] = []
+        prose: list[str] = []
+        for line in lines:
+            if _LIST_ITEM.match(line):
+                if prose:
+                    rendered_lines.append(" ".join(prose))
+                    prose = []
+                rendered_lines.append(line)
+            elif prose:
+                prose.append(line)
+            elif (
+                rendered_lines
+                and _LIST_ITEM.match(rendered_lines[-1])
+                and line[:1].islower()
+            ):
+                rendered_lines[-1] = f"{rendered_lines[-1]} {line}"
+            else:
+                prose.append(line)
+        if prose:
+            rendered_lines.append(" ".join(prose))
+        rendered_blocks.append("\n".join(rendered_lines))
+    return "\n\n".join(rendered_blocks)
+
+
 def _unsafe_character(character: str) -> bool:
     point = ord(character)
     return (
@@ -1597,6 +1695,8 @@ def _validate_output(
     if not isinstance(raw_text, str):
         raise EmailAgentError(f"{provider} returned invalid reply text")
     text = _normalize_provider_text(raw_text).strip()
+    if channel == "telegram":
+        text = _normalize_chat_layout(text)
     if not 1 <= len(text) <= _MAX_REPLY_TEXT_CHARS:
         raise EmailAgentError(f"{provider} returned invalid reply text")
     html = _reply_fragment(value, text, provider=provider, channel=channel)
@@ -1634,6 +1734,7 @@ def _validate_output(
         "topic": topic,
         "evidence_paths": trace,
         "evidence_rows": _evidence_rows(chat_evidence, citable),
+        "evidence_context": citable,
         "artifacts": _artifact_plans(requests, topic=topic, citable=citable),
     }
 
@@ -1649,7 +1750,187 @@ def _evidence_label(path: str) -> str:
     )
 
 
-def _render_evidence_text(rows: list[list[Any]]) -> str:
+_COMPACT_EVIDENCE_LABELS = {
+    "active_duration_min": "Active time",
+    "active_zone_minutes": "Active-zone load",
+    "average_pace": "Average pace",
+    "avg_hr": "Average heart rate",
+    "avg_speed_kmh": "Average speed",
+    "cadence_steps_per_min": "Cadence",
+    "calories": "Exercise calories",
+    "calories_per_min": "Calorie rate",
+    "distance_km": "Distance",
+    "duration_min": "Duration",
+    "has_gps": "GPS recorded",
+    "light_min": "Light-zone time",
+    "moderate_min": "Moderate-zone time",
+    "peak_min": "Peak-zone time",
+    "steps": "Steps",
+    "vigorous_min": "Vigorous-zone time",
+}
+
+
+def _short_evidence_day(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = date.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed.strftime("%b %d").replace(" 0", " ")
+
+
+def _compact_evidence_context(
+    parts: list[str],
+    citable: dict[str, Any] | None,
+) -> str:
+    prefix = ""
+    fallback = ""
+    if (
+        parts[0] == "recent_sessions"
+        and len(parts) > 1
+        and parts[1].isdigit()
+    ):
+        prefix = ".".join(parts[:2])
+        fallback = f"Recent session {int(parts[1]) + 1}"
+    elif "sessions" in parts:
+        session_index = parts.index("sessions") + 1
+        if session_index < len(parts) and parts[session_index].isdigit():
+            prefix = ".".join(parts[:session_index + 1])
+            scope = "Today" if parts[0] == "daily" else "Weekly"
+            fallback = f"{scope} session {int(parts[session_index]) + 1}"
+    elif (
+        len(parts) > 2
+        and parts[0] == "weekly"
+        and parts[1] == "daily"
+        and parts[2].isdigit()
+    ):
+        prefix = ".".join(parts[:3])
+        fallback = f"Weekly day {int(parts[2]) + 1}"
+    elif "series" in parts:
+        series_index = parts.index("series") + 1
+        if series_index < len(parts) and parts[series_index].isdigit():
+            prefix = ".".join(parts[:series_index + 1])
+            fallback = f"Trend entry {int(parts[series_index]) + 1}"
+    if not prefix or not citable:
+        return fallback
+    name = citable.get(f"{prefix}.name") or citable.get(f"{prefix}.type")
+    day = _short_evidence_day(
+        citable.get(f"{prefix}.day")
+        or citable.get(f"{prefix}.date")
+    )
+    start = citable.get(f"{prefix}.start")
+    if not isinstance(start, str) or not start.strip():
+        start = None
+    if isinstance(name, str) and name.strip():
+        details = ", ".join(value for value in (day, start) if value)
+        return f"{name.strip()} ({details})" if details else name.strip()
+    if day and start:
+        return f"{day}, {start}"
+    return day or start or fallback
+
+
+def _compact_evidence_label(
+    path: str,
+    citable: dict[str, Any] | None = None,
+) -> str:
+    parts = path.split(".")
+    field = parts[-1]
+    label = _COMPACT_EVIDENCE_LABELS.get(
+        field,
+        field.replace("_", " ").strip().title(),
+    )
+    context = _compact_evidence_context(parts, citable)
+    if "splits" in parts:
+        index = parts[parts.index("splits") + 1]
+        if index.isdigit():
+            label = f"Split {int(index) + 1} {label.lower()}"
+    if context:
+        return f"{context} {label.lower()}"
+    if parts[0] == "weekly":
+        return f"Weekly {label.lower()}"
+    if parts[0] == "daily":
+        return f"Today {label.lower()}"
+    if parts[0] == "trends":
+        return f"Trend {label.lower()}"
+    return label
+
+
+def _compact_evidence_value(path: str, value: Any) -> str:
+    field = path.rsplit(".", 1)[-1]
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, int):
+        rendered = f"{value:,}"
+    elif isinstance(value, float):
+        rendered = f"{value:,.2f}".rstrip("0").rstrip(".")
+    else:
+        return str(value)
+    if field == "cadence_steps_per_min":
+        return f"{rendered} steps/min"
+    if field == "calories_per_min":
+        return f"{rendered} kcal/min"
+    if field == "active_zone_minutes":
+        return f"{rendered} min"
+    if field in {
+        "avg_respiratory_rate",
+        "respiratory_rate",
+    }:
+        return f"{rendered} breaths/min"
+    if field in {
+        "avg_hours",
+        "hours_asleep",
+        "sleep_hours",
+    }:
+        return f"{rendered} h"
+    if field.endswith("_min"):
+        return f"{rendered} min"
+    if field.endswith("_km"):
+        return f"{rendered} km"
+    if field.endswith("_kmh"):
+        return f"{rendered} km/h"
+    if field.endswith("_pct"):
+        return f"{rendered}%"
+    if field.endswith("_lb"):
+        return f"{rendered} lb"
+    if field.endswith("_hours"):
+        return f"{rendered} h"
+    if field in {"avg_hr", "avg_resting_hr_bpm", "resting_hr_bpm"}:
+        return f"{rendered} bpm"
+    if field == "calories":
+        return f"{rendered} kcal"
+    return rendered
+
+
+def _render_evidence_text(
+    rows: list[list[Any]],
+    *,
+    compact: bool = False,
+    citable: dict[str, Any] | None = None,
+) -> str:
+    if compact:
+        groups: dict[str, list[str]] = {}
+        for path, value in rows:
+            parts = path.split(".")
+            context = _compact_evidence_context(parts, citable)
+            field = parts[-1]
+            if context and field in {"date", "day", "name", "type"}:
+                continue
+            full_label = _compact_evidence_label(path, citable)
+            label = (
+                full_label[len(context):].strip().capitalize()
+                if context and full_label.startswith(context)
+                else full_label
+            )
+            groups.setdefault(context, []).append(
+                f"- {label}: {_compact_evidence_value(path, value)}"
+            )
+        rendered = ["Ground truth (Fitbit)"]
+        for context, lines in groups.items():
+            if context:
+                rendered.append(context)
+            rendered.extend(lines)
+        return "\n".join(rendered) if len(rendered) > 1 else ""
     trace = "\n".join(
         f"- {_evidence_label(path)}: {_evidence_value(value)} [{path}]"
         for path, value in rows
@@ -1660,10 +1941,21 @@ def _render_evidence_text(rows: list[list[Any]]) -> str:
     )
 
 
-def _render_reply_text(text: str, rows: list[list[Any]]) -> str:
+def _render_reply_text(
+    text: str,
+    rows: list[list[Any]],
+    *,
+    channel: str = "email",
+    citable: dict[str, Any] | None = None,
+) -> str:
     if not rows:
         return text
-    return f"{text}\n\n{_render_evidence_text(rows)}"
+    evidence = _render_evidence_text(
+        rows,
+        compact=channel == "telegram",
+        citable=citable,
+    )
+    return f"{text}\n\n{evidence}" if evidence else text
 
 
 def _render_reply_html(fragment: str, rows: list[list[Any]]) -> str:
@@ -2015,6 +2307,8 @@ def draft(
             rendered_text = _render_reply_text(
                 body_text,
                 validated["evidence_rows"],
+                channel=channel,
+                citable=validated["evidence_context"],
             )
             rendered_html = _render_reply_html(
                 fragment,
