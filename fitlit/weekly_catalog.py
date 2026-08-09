@@ -57,6 +57,96 @@ def _number(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _duration_seconds(value: Any) -> float:
+    return max(0.0, _number(str(value or "").rstrip("s")))
+
+
+def _pace_text(seconds_per_meter: Any) -> str | None:
+    seconds_per_km = round(_number(seconds_per_meter) * 1000)
+    if seconds_per_km <= 0:
+        return None
+    minutes, seconds = divmod(seconds_per_km, 60)
+    return f"{minutes}:{seconds:02d}/km"
+
+
+def _exercise_details(
+    data: dict[str, Any],
+    *,
+    active_seconds: float,
+    calories: int,
+    distance_km: float,
+    steps: int,
+) -> dict[str, Any]:
+    metrics = data.get("metricsSummary")
+    if not isinstance(metrics, dict):
+        metrics = {}
+    active_minutes = active_seconds / 60 if active_seconds else 0.0
+    pace = _pace_text(metrics.get("averagePaceSecondsPerMeter"))
+    zones = metrics.get("heartRateZoneDurations")
+    zone_minutes = {}
+    if isinstance(zones, dict):
+        for source, target in (
+            ("lightTime", "light_min"),
+            ("moderateTime", "moderate_min"),
+            ("vigorousTime", "vigorous_min"),
+            ("peakTime", "peak_min"),
+        ):
+            if source in zones:
+                zone_minutes[target] = round(
+                    _duration_seconds(zones[source]) / 60,
+                    1,
+                )
+    splits = []
+    raw_splits = data.get("splits")
+    if isinstance(raw_splits, list):
+        for split in raw_splits:
+            if not isinstance(split, dict):
+                continue
+            summary = split.get("metricsSummary")
+            if not isinstance(summary, dict):
+                continue
+            split_distance = _number(summary.get("distanceMillimeters")) / 1_000_000
+            split_pace = _pace_text(
+                summary.get("averagePaceSecondsPerMeter")
+            )
+            split_seconds = _duration_seconds(split.get("activeDuration"))
+            if split_distance <= 0 and not split_pace and split_seconds <= 0:
+                continue
+            splits.append({
+                "distance_km": round(split_distance, 2),
+                "active_duration_min": round(split_seconds / 60, 1),
+                "average_pace": split_pace,
+            })
+    metadata = data.get("exerciseMetadata")
+    has_gps = (
+        metadata.get("hasGps")
+        if isinstance(metadata, dict)
+        and isinstance(metadata.get("hasGps"), bool)
+        else None
+    )
+    return {
+        "average_pace": pace,
+        "avg_speed_kmh": (
+            round(distance_km / active_minutes * 60, 1)
+            if distance_km > 0 and active_minutes > 0
+            else None
+        ),
+        "cadence_steps_per_min": (
+            round(steps / active_minutes)
+            if steps > 0 and active_minutes > 0
+            else None
+        ),
+        "calories_per_min": (
+            round(calories / active_minutes, 1)
+            if calories > 0 and active_minutes > 0
+            else None
+        ),
+        "heart_rate_zones": zone_minutes,
+        "has_gps": has_gps,
+        "splits": splits,
+    }
+
+
 def _mean(values: list[float | int | None]) -> float | None:
     clean = [float(value) for value in values if value is not None]
     return statistics.mean(clean) if clean else None
@@ -133,7 +223,8 @@ def _sessions(start: date, end: date) -> list[dict]:
     rows = _query("daily_summaries", """
         SELECT name,start_time,end_time,exercise_type,display_name,active_duration,
                calories_kcal,distance_millimeters,exercise_steps,active_zone_minutes,
-               json_extract(data_json,'$.metricsSummary.averageHeartRateBeatsPerMinute') avg_hr
+               json_extract(data_json,'$.metricsSummary.averageHeartRateBeatsPerMinute') avg_hr,
+               data_json
         FROM exercise
         WHERE date(
                   start_time,
@@ -153,9 +244,17 @@ def _sessions(start: date, end: date) -> list[dict]:
         duration_min = elapsed_seconds / 60
         calories = round(_number(row["calories_kcal"]))
         zone_minutes = round(_number(row["active_zone_minutes"]))
+        distance_km = _number(row["distance_millimeters"]) / 1_000_000
+        steps = round(_number(row["exercise_steps"]))
         average_hr = (
             round(_number(row["avg_hr"])) if row["avg_hr"] is not None else None
         )
+        try:
+            raw_data = json.loads(row["data_json"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            raw_data = {}
+        if not isinstance(raw_data, dict):
+            raw_data = {}
         flags = []
         if active_seconds and elapsed_seconds and active_seconds > elapsed_seconds * 1.25 + 300:
             flags.append("active duration exceeds elapsed window")
@@ -176,12 +275,19 @@ def _sessions(start: date, end: date) -> list[dict]:
             "duration_min": round(duration_min),
             "active_duration_min": round(active_seconds / 60) if active_seconds else None,
             "calories": calories,
-            "distance_km": round(_number(row["distance_millimeters"]) / 1_000_000, 2),
-            "steps": round(_number(row["exercise_steps"])),
+            "distance_km": round(distance_km, 2),
+            "steps": steps,
             "active_zone_minutes": zone_minutes,
             "avg_hr": average_hr,
             "is_training": training,
             "quality_flags": flags,
+            **_exercise_details(
+                raw_data,
+                active_seconds=active_seconds,
+                calories=calories,
+                distance_km=distance_km,
+                steps=steps,
+            ),
         })
     return sessions
 
