@@ -286,12 +286,15 @@ class EmailAgentRequestTests(unittest.TestCase):
         )
         self.assertIn("html", schema["properties"])
         instructions = " ".join(request["system_instructions"]).lower()
-        self.assertIn("two to five concise sentences", instructions)
-        self.assertIn("at most five short bullets", instructions)
+        self.assertIn("three to seven concise sentences", instructions)
+        self.assertIn("up to six short bullets", instructions)
         self.assertIn("do not repeat the question", instructions)
-        self.assertIn("under about 600 characters", instructions)
-        self.assertIn("normally one to four scalar paths", instructions)
-        self.assertIn("expand only when the user explicitly asks", instructions)
+        self.assertIn("under about 1,200 characters", instructions)
+        self.assertIn("normally select five to ten", instructions)
+        self.assertIn("heart-rate zones", instructions)
+        self.assertIn("active-zone minutes are weighted", instructions)
+        self.assertIn("same-session evidence", instructions)
+        self.assertIn("prefer pace, splits, zones, cadence", instructions)
         self.assertIn("html is optional", instructions)
         self.assertIn(
             "only when the newest user message requests",
@@ -434,6 +437,105 @@ class EmailAgentRequestTests(unittest.TestCase):
         self.assertIn(
             "Daily › Steps: 10000 [daily.steps]",
             email_agent._render_evidence_text(validated["evidence_rows"]),
+        )
+        compact = email_agent._render_evidence_text(
+            [["recent_sessions.9.avg_hr", 172]],
+            compact=True,
+        )
+        self.assertEqual(
+            (
+                "Ground truth (Fitbit)\n"
+                "Recent session 10\n"
+                "- Average heart rate: 172 bpm"
+            ),
+            compact,
+        )
+        self.assertNotIn("recent_sessions", compact)
+
+    def test_telegram_text_collapses_hard_wraps_but_preserves_lists(self) -> None:
+        self.assertEqual(
+            (
+                "The first sentence was wrapped by the provider.\n\n"
+                "- First item continues here\n"
+                "- Second item"
+            ),
+            email_agent._normalize_chat_layout(
+                "The first sentence was\n"
+                "wrapped by the provider.\n\n"
+                "- First item\n"
+                "continues here\n"
+                "- Second item"
+            ),
+        )
+        self.assertEqual(
+            (
+                "Bottom line.\n"
+                "\u2022 Pace: 5:57/km\n"
+                "\u2022 Distance: 4.21 km\n"
+                "Overall this was a hard effort."
+            ),
+            email_agent._normalize_chat_layout(
+                "Bottom line.\n"
+                "\u2022 Pace: 5:57/km\n"
+                "\u2022 Distance: 4.21 km\n"
+                "Overall this was a hard effort."
+            ),
+        )
+        self.assertEqual(
+            (
+                "- Pace: 5:57/km\n"
+                "- Distance: 4.21 km\n"
+                "Overall this was a hard effort for you today."
+            ),
+            email_agent._normalize_chat_layout(
+                "- Pace: 5:57/km\n"
+                "- Distance: 4.21 km\n"
+                "Overall this was a hard\n"
+                "effort for you today."
+            ),
+        )
+
+    def test_compact_evidence_labels_disambiguate_session_rows(self) -> None:
+        rendered = email_agent._render_evidence_text(
+            [
+                ["daily.activity.steps", 6884],
+                ["daily.training.sessions.0.steps", 2954],
+                ["recent_sessions.6.average_pace", "5:57/km"],
+                ["recent_sessions.10.average_pace", "14:53/km"],
+                ["weekly.daily.0.steps", 9000],
+            ],
+            compact=True,
+            citable={
+                "daily.training.sessions.0.name": "Walk",
+                "daily.training.sessions.0.day": "2026-08-09",
+                "daily.training.sessions.0.start": "8:00 AM",
+                "recent_sessions.6.name": "Run",
+                "recent_sessions.6.day": "2026-08-07",
+                "recent_sessions.6.start": "7:39 PM",
+                "recent_sessions.10.name": "Walk",
+                "recent_sessions.10.day": "2026-08-09",
+                "recent_sessions.10.start": "6:00 PM",
+                "weekly.daily.0.day": "2026-08-03",
+            },
+        )
+        self.assertIn("- Today steps: 6,884", rendered)
+        self.assertIn("Walk (Aug 9, 8:00 AM)\n- Steps: 2,954", rendered)
+        self.assertIn(
+            "Run (Aug 7, 7:39 PM)\n- Average pace: 5:57/km",
+            rendered,
+        )
+        self.assertIn("Walk (Aug 9, 6:00 PM)", rendered)
+        self.assertIn("- Average pace: 14:53/km", rendered)
+        self.assertIn("Aug 3\n- Steps: 9,000", rendered)
+
+    def test_compact_evidence_omits_empty_context_only_block(self) -> None:
+        self.assertEqual(
+            "",
+            email_agent._render_evidence_text(
+                [["recent_sessions.9.name", "Walk"]],
+                compact=True,
+                citable={"recent_sessions.9.name": "Walk"},
+            ),
         )
 
     def test_provider_cannot_control_persisted_topic_or_filename(self) -> None:
@@ -1161,6 +1263,22 @@ class EmailAgentEvidenceTests(unittest.TestCase):
         self.assertIn("recent_sessions.7.duration_min", training)
         self.assertFalse([path for path in training if "weight_30_days" in path])
 
+    def test_training_evidence_reserves_session_daily_and_weekly_data(self) -> None:
+        evidence = email_agent.citable_evidence(
+            snapshot(),
+            "How was my run today and how many steps did I get?",
+        )
+        self.assertTrue(
+            any(path.startswith("recent_sessions.") for path in evidence)
+        )
+        self.assertTrue(
+            any(path.startswith("daily.training.") for path in evidence)
+        )
+        self.assertTrue(
+            any(path.startswith("weekly.training.") for path in evidence)
+        )
+        self.assertIn("daily.activity.steps", evidence)
+
     def test_terse_followup_uses_recent_user_intent_for_evidence(self) -> None:
         values = [
             email_agent.ThreadTurn("user", "Show my weight trend.", 1),
@@ -1396,7 +1514,7 @@ class EmailAgentBudgetTests(unittest.TestCase):
 
     def test_evidence_tier_is_reduced_before_context_is_dropped(self) -> None:
         with (
-            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", 9_000),
+            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", 10_000),
             patch(
                 "fitlit.email_agent.build_grounding",
                 return_value=snapshot(),
@@ -1414,7 +1532,7 @@ class EmailAgentBudgetTests(unittest.TestCase):
         self.assertEqual(3, policy["messages_supplied"])
         self.assertLessEqual(
             len(email_agent.encode_request(request).encode("utf-8")),
-            9_000,
+            10_000,
         )
 
     def test_omission_keeps_the_most_recent_turns_that_still_fit(self) -> None:
@@ -1546,7 +1664,7 @@ class EmailAgentChannelTests(unittest.TestCase):
     ) -> None:
         grounding = {"daily": {f"metric_{index}": index for index in range(20)}}
         paths = [f"daily.metric_{index}" for index in range(20)]
-        for channel, cap in (("telegram", 6), ("email", 12)):
+        for channel, cap in (("telegram", 10), ("email", 12)):
             with self.subTest(channel=channel):
                 validated = email_agent._validate_output(
                     {
@@ -1582,7 +1700,7 @@ class EmailAgentChannelTests(unittest.TestCase):
             grounding,
             channel="telegram",
         )
-        self.assertEqual(7, len(validated["evidence_paths"]))
+        self.assertEqual(11, len(validated["evidence_paths"]))
         self.assertEqual("daily.metric_19", validated["evidence_paths"][-1])
 
     def test_provider_text_is_unicode_hardened(self) -> None:
@@ -1603,7 +1721,7 @@ class EmailAgentChannelTests(unittest.TestCase):
             channel="telegram",
         )
         self.assertEqual(
-            "Caf\u00e9 recap reversed done\nsecond line\nthird line\ttabbed "
+            "Caf\u00e9 recap reversed done second line third line\ttabbed "
             "\U0001f469\u200d\U0001f4bb \u2764\ufe0f",
             validated["text"],
         )
