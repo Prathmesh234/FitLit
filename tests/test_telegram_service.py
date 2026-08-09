@@ -1695,6 +1695,12 @@ class TelegramContextTests(unittest.TestCase):
                 "data for your latest query:\n\n- A: 1 [a]"
             ),
         )
+        self.assertEqual(
+            "kept",
+            telegram_service.model_visible_assistant_text(
+                "kept\n\nGround truth (Fitbit)\n- Average pace: 5:57/km"
+            ),
+        )
 
 
 class TelegramStatusTests(unittest.TestCase):
