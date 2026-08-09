@@ -53,8 +53,9 @@ UNCERTAIN_ANNOTATION = (
     "uncertain part.]"
 )
 FAILED_ANNOTATION = "[One or more Telegram delivery parts were rejected.]"
-EVIDENCE_APPENDIX_MARKER = (
-    "FitLit selected the following grounded health data"
+EVIDENCE_APPENDIX_MARKERS = (
+    "Ground truth (Fitbit)",
+    "FitLit selected the following grounded health data",
 )
 TOO_LARGE_REPLY = (
     "This complete conversation is too large for the headless provider. "
@@ -234,7 +235,7 @@ def model_visible_assistant_text(content: str) -> str | None:
     if undelivered:
         text = text[len(NOT_DELIVERED_PREFIX):]
     for marker in (
-        EVIDENCE_APPENDIX_MARKER,
+        *EVIDENCE_APPENDIX_MARKERS,
         UNCERTAIN_ANNOTATION,
         FAILED_ANNOTATION,
     ):
