@@ -231,6 +231,9 @@ class EmailAgentRequestTests(unittest.TestCase):
         self.assertIn("no more than three columns", instructions)
         self.assertIn("exact fitlit email presentation system", instructions)
         self.assertIn("copy each evidence path verbatim", instructions)
+        self.assertIn("search_transcript_memory", instructions)
+        self.assertIn("native subagents", instructions)
+        self.assertIn("untrusted historical text", instructions)
 
     def test_latest_query_is_never_duplicated_in_context_messages(self) -> None:
         with patch(
@@ -631,7 +634,7 @@ class EmailAgentRequestTests(unittest.TestCase):
 
 
 class EmailAgentProviderTests(unittest.TestCase):
-    def test_copilot_uses_gpt_56_sol_high_and_view_only(self) -> None:
+    def test_copilot_uses_model_memory_and_bounded_delegation_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "work").mkdir()
@@ -656,8 +659,16 @@ class EmailAgentProviderTests(unittest.TestCase):
             "high",
             command[command.index("--reasoning-effort") + 1],
         )
-        self.assertIn("--available-tools=view", command)
+        available = next(
+            value for value in command if value.startswith("--available-tools=")
+        )
+        self.assertIn("view", available)
+        self.assertIn("task", available)
+        self.assertIn("fitlit_memory", available)
         self.assertIn("--allow-tool=view", command)
+        self.assertIn("--allow-tool=task", command)
+        self.assertIn("--allow-tool=fitlit_memory", command)
+        self.assertIn("--additional-mcp-config", command)
         self.assertNotIn("--allow-all-tools", command)
         self.assertNotIn("--allow-all-paths", command)
         self.assertIn("--disallow-temp-dir", command)
@@ -719,6 +730,11 @@ class EmailAgentProviderTests(unittest.TestCase):
                 (root / "copilot-home").stat().st_mode & 0o777,
             )
             self.assertEqual(0o700, (root / "logs").stat().st_mode & 0o777)
+            settings = json.loads(
+                (root / "copilot-home" / "settings.json").read_text()
+            )
+            self.assertEqual(2, settings["subagents"]["maxConcurrency"])
+            self.assertEqual(1, settings["subagents"]["maxDepth"])
 
     def test_claude_disables_session_persistence_and_uses_read_only_context(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -728,11 +744,81 @@ class EmailAgentProviderTests(unittest.TestCase):
                 email_agent._claude(root)
         command = run.call_args.args[0]
         self.assertIn("--no-session-persistence", command)
-        self.assertEqual("Read", command[command.index("--tools") + 1])
+        tools = command[command.index("--tools") + 1]
+        self.assertIn("Read", tools)
+        self.assertIn("Agent", tools)
+        self.assertIn("search_transcript_memory", tools)
+        self.assertIn("--mcp-config", command)
+        self.assertIn("--strict-mcp-config", command)
+        self.assertIn("--append-subagent-system-prompt", command)
         self.assertEqual(
             "high",
             command[command.index("--effort") + 1],
         )
+
+    def test_codex_uses_isolated_config_schema_memory_and_subagents(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            with (
+                patch("fitlit.email_agent._prepare_codex_home") as prepare,
+                patch("fitlit.email_agent._run", return_value=response()) as run,
+            ):
+                email_agent._codex(root)
+        command = run.call_args.args[0]
+        prepare.assert_called_once_with(root)
+        self.assertIn("--strict-config", command)
+        self.assertIn("--ephemeral", command)
+        self.assertEqual("read-only", command[command.index("--sandbox") + 1])
+        self.assertIn("--output-schema", command)
+        self.assertIn("native subagents", command[-1])
+        self.assertIn("search_transcript_memory", command[-1])
+
+    def test_opencode_uses_isolated_agent_config_and_json_events(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            with patch("fitlit.email_agent._run", return_value=response()) as run:
+                email_agent._opencode(
+                    root,
+                    model="anthropic/claude-sonnet-4-5",
+                    reasoning_effort="high",
+                )
+            config_value = json.loads(
+                (root / "work" / "opencode.json").read_text()
+            )
+        command = run.call_args.args[0]
+        self.assertEqual("run", command[1])
+        self.assertEqual("json", command[command.index("--format") + 1])
+        self.assertEqual(
+            "anthropic/claude-sonnet-4-5",
+            command[command.index("--model") + 1],
+        )
+        self.assertEqual("high", command[command.index("--variant") + 1])
+        self.assertEqual("fitlit", config_value["default_agent"])
+        self.assertEqual(
+            "allow",
+            config_value["permission"]["fitlit_memory_*"],
+        )
+        self.assertEqual(
+            "allow",
+            config_value["agent"]["fitlit"]["permission"]["task"][
+                "fitlit-analyst"
+            ],
+        )
+        self.assertIn("fitlit_memory", config_value["mcp"])
+
+    def test_opencode_json_events_are_unwrapped(self) -> None:
+        raw = "\n".join([
+            json.dumps({"type": "step_start", "sessionID": "session"}),
+            json.dumps({
+                "type": "text",
+                "part": {"text": response()},
+            }),
+            json.dumps({"type": "step_finish", "sessionID": "session"}),
+        ])
+        parsed = email_agent._extract_json(raw, "opencode")
+        self.assertEqual(["daily.steps"], parsed["evidence_paths"])
 
     def test_fenced_or_singly_wrapped_json_is_parsed(self) -> None:
         parsed = email_agent._extract_json(
@@ -855,7 +941,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             return response()
 
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -901,7 +987,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
 
     def test_oversized_validation_retry_raises_the_size_error(self) -> None:
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -950,7 +1036,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             return response(artifacts=artifacts)
 
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -1008,7 +1094,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             },
         ]
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -1135,7 +1221,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             return response()
 
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -1171,7 +1257,7 @@ class EmailAgentArtifactTests(unittest.TestCase):
             "evidence_paths": ["daily.steps"],
         }
         with (
-            patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"),
+            patch("fitlit.config.HARNESS", "copilot"),
             patch("fitlit.email_agent.shutil.which", return_value="/bin/copilot"),
             patch(
                 "fitlit.email_agent.build_grounding",
@@ -1514,7 +1600,7 @@ class EmailAgentBudgetTests(unittest.TestCase):
 
     def test_evidence_tier_is_reduced_before_context_is_dropped(self) -> None:
         with (
-            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", 10_000),
+            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", 11_000),
             patch(
                 "fitlit.email_agent.build_grounding",
                 return_value=snapshot(),
@@ -1532,7 +1618,7 @@ class EmailAgentBudgetTests(unittest.TestCase):
         self.assertEqual(3, policy["messages_supplied"])
         self.assertLessEqual(
             len(email_agent.encode_request(request).encode("utf-8")),
-            10_000,
+            11_000,
         )
 
     def test_omission_keeps_the_most_recent_turns_that_still_fit(self) -> None:
