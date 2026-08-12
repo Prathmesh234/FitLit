@@ -111,14 +111,17 @@ webhook. Keep the existing 15-minute Gmail timer enabled as reconciliation.
 Configure the command-reply harness in `.env`:
 
 ```ini
-FITLIT_EMAIL_AGENT_PROVIDER=copilot
+HARNESS=copilot
 FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
 
-Copilot runs with an isolated temporary `COPILOT_HOME`, no remote export, no
-MCP servers, and only read access to its temporary request. It receives one
+The global harness can be `copilot`, `codex`, `claude`, or `opencode`; it is
+used by every Telegram, Gmail, artifact-drafting, and optional enrichment model
+call. Each conversational run has an isolated temporary workspace, a read-only
+transcript-memory MCP tool, and bounded native subagent delegation for complex
+analysis. It receives one
 compact `citable_evidence` map of exact `path: value` pairs chosen for the
 newest question, produces natural conversational text, copies evidence keys
 verbatim for health claims, and can request XLSX/DOCX/HTML/PNG types. The
@@ -129,12 +132,14 @@ logs, and artifacts are deleted after delivery.
 The optional Telegram daemon long-polls every five seconds and stores complete
 indexed conversations in owner-only
 `data/state/telegram-conversations.sqlite3`. Each normal message supplies the
-active transcript to the same isolated provider with
+active transcript to the same isolated harness with
 `**LATEST QUERY**` explicitly marked, compacting only the provider view if the
 composed request would exceed `FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES`.
 `/new` archives the current thread and starts the next index without deleting
 history; `/reset` is disabled. Telegram can deliver the same XLSX/DOCX evidence
-plus safe HTML and locally rendered PNG screenshot artifacts.
+plus safe HTML and locally rendered PNG screenshot artifacts. Archived turns
+are indexed with SQLite FTS5 and can be searched when the owner refers to an
+earlier conversation.
 
 ## 5. Configure optional proactive-report AI
 
@@ -146,6 +151,7 @@ instructions:
 - GitHub Copilot CLI: <https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli>
 - OpenAI Codex CLI: <https://learn.chatgpt.com/docs/codex-cli>
 - Claude Code: <https://docs.anthropic.com/en/docs/claude-code/setup>
+- OpenCode: <https://opencode.ai/docs/>
 
 Authentication choices:
 
@@ -154,19 +160,21 @@ Authentication choices:
   `codex login --device-auth`. API-key automation may use `CODEX_API_KEY`.
 - Claude: FitLit invokes `--bare`, which requires `ANTHROPIC_API_KEY` or
   configured Bedrock/Vertex/Foundry credentials.
+- OpenCode: run `opencode auth login` as the final service user or provide the
+  selected model provider's API key.
 
-Enable provider fallback in `.env`:
+Enable enrichment through the same harness:
 
 ```ini
 FITLIT_AI_ENABLED=true
-FITLIT_AI_PROVIDER=auto
-FITLIT_AI_PROVIDER_ORDER=copilot,codex,claude
 ```
 
 The runtime invokes AI only after deterministic reservation. It uses an empty
 temporary working directory, strips application secrets, disables provider
 tools/instructions/session persistence where supported, enforces a timeout and
 schema, and sends the original report unchanged on any failure.
+Detailed setup and verified headless/subagent behavior are in
+[`docs/HEADLESS_HARNESSES.md`](docs/HEADLESS_HARNESSES.md).
 
 ## 6. Configure optional private Telegram
 
