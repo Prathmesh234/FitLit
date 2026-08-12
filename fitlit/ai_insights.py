@@ -16,7 +16,7 @@ from typing import Any
 from fitlit import config
 
 log = logging.getLogger("fitlit.ai_insights")
-PROVIDERS = ("copilot", "codex", "claude")
+PROVIDERS = ("copilot", "codex", "claude", "opencode")
 _SAFE_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 _SAFE_TEXT = re.compile(r"^[A-Za-z0-9 .,%:+/_()\-]{1,80}$")
 _ENV_ALLOWLIST = {
@@ -149,6 +149,8 @@ def _validate(value: Any, provider: str) -> AIInsight:
 def parse_response(raw: str, provider: str) -> AIInsight:
     if len(raw) > config.AI_MAX_OUTPUT_CHARS:
         raise AIInsightError(f"{provider} output exceeded the size limit")
+    if provider == "opencode":
+        raw = _opencode_result(raw)
     try:
         value = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -163,12 +165,53 @@ def parse_response(raw: str, provider: str) -> AIInsight:
     return _validate(value, provider)
 
 
+def _opencode_result(raw: str) -> str:
+    events = []
+    for line in raw.splitlines():
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            return raw
+        if not isinstance(event, dict):
+            return raw
+        events.append(event)
+    if not events or (
+        len(events) == 1
+        and {"headline", "observations", "confidence"}.issubset(events[0])
+    ):
+        return raw
+    if any(event.get("type") == "error" for event in events):
+        raise AIInsightError("opencode returned an error event")
+    fragments = []
+    for event in events:
+        if event.get("type") != "text":
+            continue
+        part = event.get("part")
+        text = part.get("text") if isinstance(part, dict) else event.get("text")
+        if isinstance(text, str):
+            fragments.append(text)
+    if not fragments:
+        raise AIInsightError("opencode returned no final text")
+    return "".join(fragments)
+
+
 def _run(command: list[str], cwd: Path, *, output_path: Path | None = None) -> str:
+    environment = minimal_environment()
+    environment.update({
+        "XDG_CONFIG_HOME": str(cwd / "opencode-config"),
+        "XDG_CACHE_HOME": str(cwd / "opencode-cache"),
+        "XDG_STATE_HOME": str(cwd / "opencode-state"),
+        "OPENCODE_DISABLE_AUTOUPDATE": "1",
+        "NO_COLOR": "1",
+        "CI": "1",
+    })
     try:
         completed = subprocess.run(
             command,
             cwd=cwd,
-            env=minimal_environment(),
+            env=environment,
             capture_output=True,
             text=True,
             timeout=config.AI_TIMEOUT_SECONDS,
@@ -206,6 +249,7 @@ def _copilot(prompt: str, cwd: Path) -> str:
     ]
     if config.AI_COPILOT_MODEL:
         command.extend(["--model", config.AI_COPILOT_MODEL])
+    command.extend(["--reasoning-effort", config.AI_REASONING_EFFORT])
     return _run(command, cwd)
 
 
@@ -226,6 +270,8 @@ def _codex(prompt: str, cwd: Path) -> str:
         str(schema_path),
         "--output-last-message",
         str(output_path),
+        "-c",
+        f'model_reasoning_effort="{config.AI_REASONING_EFFORT}"',
     ]
     if config.AI_CODEX_MODEL:
         command.extend(["--model", config.AI_CODEX_MODEL])
@@ -249,6 +295,8 @@ def _claude(prompt: str, cwd: Path) -> str:
         "dontAsk",
         "--disable-slash-commands",
         "--no-session-persistence",
+        "--effort",
+        config.AI_REASONING_EFFORT,
         "--max-budget-usd",
         config.AI_CLAUDE_MAX_BUDGET_USD,
     ]
@@ -257,7 +305,54 @@ def _claude(prompt: str, cwd: Path) -> str:
     return _run(command, cwd)
 
 
-_ADAPTERS = {"copilot": _copilot, "codex": _codex, "claude": _claude}
+def _opencode(prompt: str, cwd: Path) -> str:
+    for name in ("opencode-config", "opencode-cache", "opencode-state"):
+        path = cwd / name
+        path.mkdir(mode=0o700, exist_ok=True)
+        path.chmod(0o700)
+    (cwd / "opencode.json").write_text(json.dumps({
+        "$schema": "https://opencode.ai/config.json",
+        "share": "disabled",
+        "autoupdate": False,
+        "default_agent": "fitlit-ai",
+        "permission": {"*": "deny", "question": "deny"},
+        "agent": {
+            "fitlit-ai": {
+                "description": "Produces one validated FitLit observation object",
+                "mode": "primary",
+                "steps": 2,
+                "prompt": (
+                    "Return only the requested JSON object. Do not use tools, "
+                    "delegate work, or request user input."
+                ),
+                "permission": {"*": "deny", "question": "deny"},
+            },
+        },
+    }, separators=(",", ":")))
+    command = [
+        "opencode",
+        "run",
+        "--dir",
+        str(cwd),
+        "--agent",
+        "fitlit-ai",
+        "--format",
+        "json",
+        "--title",
+        "fitlit-ai",
+    ]
+    if config.AI_OPENCODE_MODEL:
+        command.extend(["--model", config.AI_OPENCODE_MODEL])
+    command.extend(["--variant", config.AI_REASONING_EFFORT, prompt])
+    return _run(command, cwd)
+
+
+_ADAPTERS = {
+    "copilot": _copilot,
+    "codex": _codex,
+    "claude": _claude,
+    "opencode": _opencode,
+}
 
 
 def available_providers() -> list[str]:
@@ -268,11 +363,7 @@ def generate(payload: dict[str, Any]) -> AIInsight | None:
     """Try configured providers in order; return None for deterministic fallback."""
     if not config.AI_ENABLED:
         return None
-    providers = (
-        config.AI_PROVIDER_ORDER
-        if config.AI_PROVIDER == "auto"
-        else (config.AI_PROVIDER,)
-    )
+    providers = (config.HARNESS,)
     try:
         prompt = _prompt(payload)
     except AIInsightError as exc:
