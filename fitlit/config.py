@@ -76,6 +76,15 @@ def _env_optional_int(name: str) -> int | None:
     return int(value) if value.isdecimal() else None
 
 
+# Every model-backed workflow uses the same installed headless harness. Keep
+# harness-specific model names separate because their identifier formats differ.
+HARNESSES = ("copilot", "codex", "claude", "opencode")
+HARNESS = _env(
+    "HARNESS",
+    _env("FITLIT_EMAIL_AGENT_PROVIDER", "copilot"),
+).lower()
+
+
 # --------------------------------------------------------------------------- #
 # Google Health API target + auth
 # --------------------------------------------------------------------------- #
@@ -166,7 +175,8 @@ GMAIL_INBOX_RETRY_BASE_SECONDS = max(
 # Provider-centered inbox replies. Once the first command thread succeeds, only
 # that exact Gmail chain is polled and at most its latest five messages are
 # exposed to the isolated headless provider.
-EMAIL_AGENT_PROVIDER = _env("FITLIT_EMAIL_AGENT_PROVIDER", "copilot").lower()
+# Compatibility alias for older callers; HARNESS is the sole runtime selector.
+EMAIL_AGENT_PROVIDER = HARNESS
 EMAIL_AGENT_CONTEXT_MESSAGES = max(
     1,
     min(5, int(_env("FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES", "5"))),
@@ -206,10 +216,19 @@ EMAIL_AGENT_COPILOT_MODEL = _env(
 )
 EMAIL_AGENT_CODEX_MODEL = _env("FITLIT_EMAIL_AGENT_CODEX_MODEL", "")
 EMAIL_AGENT_CLAUDE_MODEL = _env("FITLIT_EMAIL_AGENT_CLAUDE_MODEL", "")
+EMAIL_AGENT_OPENCODE_MODEL = _env("FITLIT_EMAIL_AGENT_OPENCODE_MODEL", "")
 EMAIL_AGENT_REASONING_EFFORT = _env(
     "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
     "high",
 ).lower()
+EMAIL_AGENT_MAX_TURNS = max(
+    2,
+    min(30, int(_env("FITLIT_EMAIL_AGENT_MAX_TURNS", "10"))),
+)
+EMAIL_AGENT_MAX_SUBAGENTS = max(
+    1,
+    min(4, int(_env("FITLIT_EMAIL_AGENT_MAX_SUBAGENTS", "2"))),
+)
 EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env(
     "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD",
     "0.20",
@@ -225,6 +244,18 @@ TELEGRAM_TRUSTED_USER_ID = _env_optional_int(
 TELEGRAM_COPILOT_MODEL = _env(
     "FITLIT_TELEGRAM_COPILOT_MODEL",
     "gpt-5.6-terra",
+)
+TELEGRAM_CODEX_MODEL = _env(
+    "FITLIT_TELEGRAM_CODEX_MODEL",
+    EMAIL_AGENT_CODEX_MODEL,
+)
+TELEGRAM_CLAUDE_MODEL = _env(
+    "FITLIT_TELEGRAM_CLAUDE_MODEL",
+    EMAIL_AGENT_CLAUDE_MODEL,
+)
+TELEGRAM_OPENCODE_MODEL = _env(
+    "FITLIT_TELEGRAM_OPENCODE_MODEL",
+    EMAIL_AGENT_OPENCODE_MODEL,
 )
 TELEGRAM_REASONING_EFFORT = _env(
     "FITLIT_TELEGRAM_REASONING_EFFORT",
@@ -267,17 +298,19 @@ TELEGRAM_POISON_ATTEMPTS = max(
 # Optional provider-neutral AI enrichment. Detection, caps, deduplication, and
 # delivery stay deterministic; this layer can only add validated observations.
 AI_ENABLED = _env_bool("FITLIT_AI_ENABLED")
-AI_PROVIDER = _env("FITLIT_AI_PROVIDER", "auto").lower()
-AI_PROVIDER_ORDER = tuple(
-    provider.strip().lower()
-    for provider in _env("FITLIT_AI_PROVIDER_ORDER", "copilot,codex,claude").split(",")
-    if provider.strip()
-)
+# Compatibility aliases: proactive enrichment follows the global harness too.
+AI_PROVIDER = HARNESS
+AI_PROVIDER_ORDER = (HARNESS,)
 AI_TIMEOUT_SECONDS = max(5, int(_env("FITLIT_AI_TIMEOUT_SECONDS", "45")))
 AI_MAX_OUTPUT_CHARS = max(500, int(_env("FITLIT_AI_MAX_OUTPUT_CHARS", "6000")))
 AI_COPILOT_MODEL = _env("FITLIT_AI_COPILOT_MODEL", "")
 AI_CODEX_MODEL = _env("FITLIT_AI_CODEX_MODEL", "")
 AI_CLAUDE_MODEL = _env("FITLIT_AI_CLAUDE_MODEL", "")
+AI_OPENCODE_MODEL = _env("FITLIT_AI_OPENCODE_MODEL", "")
+AI_REASONING_EFFORT = _env(
+    "FITLIT_AI_REASONING_EFFORT",
+    "medium",
+).lower()
 AI_CLAUDE_MAX_BUDGET_USD = _env("FITLIT_AI_CLAUDE_MAX_BUDGET_USD", "0.05")
 
 # Optional private coaching profile. Keep real values in .env, never source.
