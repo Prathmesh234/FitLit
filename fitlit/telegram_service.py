@@ -472,6 +472,12 @@ class TelegramTranscriptStore:
         if self.path.exists() and self.path.is_symlink():
             raise TelegramError("refusing symlinked Telegram transcript database")
         with self._connect() as connection:
+            memory_index_exists = connection.execute(
+                """
+                SELECT 1 FROM sqlite_master
+                WHERE type = 'table' AND name = 'turns_fts'
+                """
+            ).fetchone() is not None
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS conversations (
@@ -547,6 +553,29 @@ class TelegramTranscriptStore:
                     last_error TEXT NOT NULL,
                     first_seen_ms INTEGER NOT NULL
                 );
+                CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+                    content,
+                    content = 'turns',
+                    content_rowid = 'id',
+                    tokenize = 'unicode61 remove_diacritics 2'
+                );
+                CREATE TRIGGER IF NOT EXISTS turns_fts_insert
+                AFTER INSERT ON turns BEGIN
+                    INSERT INTO turns_fts(rowid, content)
+                    VALUES (new.id, new.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS turns_fts_delete
+                AFTER DELETE ON turns BEGIN
+                    INSERT INTO turns_fts(turns_fts, rowid, content)
+                    VALUES ('delete', old.id, old.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS turns_fts_update
+                AFTER UPDATE OF content ON turns BEGIN
+                    INSERT INTO turns_fts(turns_fts, rowid, content)
+                    VALUES ('delete', old.id, old.content);
+                    INSERT INTO turns_fts(rowid, content)
+                    VALUES (new.id, new.content);
+                END;
                 """
             )
             columns = {
@@ -571,6 +600,10 @@ class TelegramTranscriptStore:
             if "provider_content" not in turn_columns:
                 connection.execute(
                     "ALTER TABLE turns ADD COLUMN provider_content TEXT"
+                )
+            if not memory_index_exists:
+                connection.execute(
+                    "INSERT INTO turns_fts(turns_fts) VALUES ('rebuild')"
                 )
         self.path.chmod(0o600)
 
@@ -1783,11 +1816,7 @@ def _grounded_reply(
                     context_limit=None,
                     channel="telegram",
                     instructions=conversation.system_instructions,
-                    model=(
-                        config.TELEGRAM_COPILOT_MODEL
-                        if config.EMAIL_AGENT_PROVIDER == "copilot"
-                        else None
-                    ),
+                    model=_telegram_model(),
                     reasoning_effort=config.TELEGRAM_REASONING_EFFORT,
                 ) as reply:
                     assistant_text = reply.text
@@ -2140,15 +2169,16 @@ def _initialize(
 
 
 def _telegram_model() -> str | None:
-    return (
-        config.TELEGRAM_COPILOT_MODEL
-        if config.EMAIL_AGENT_PROVIDER == "copilot"
-        else None
-    )
+    return {
+        "copilot": config.TELEGRAM_COPILOT_MODEL,
+        "codex": config.TELEGRAM_CODEX_MODEL,
+        "claude": config.TELEGRAM_CLAUDE_MODEL,
+        "opencode": config.TELEGRAM_OPENCODE_MODEL,
+    }.get(config.HARNESS) or None
 
 
 def provider_installed() -> bool:
-    provider = config.EMAIL_AGENT_PROVIDER
+    provider = config.HARNESS
     return (
         provider in email_agent.PROVIDERS
         and bool(shutil.which(provider))
@@ -2170,9 +2200,9 @@ def effort_valid() -> bool:
 
 def _validate_agent_settings() -> None:
     """Fail fast before polling rather than once per delivered question."""
-    if config.EMAIL_AGENT_PROVIDER not in email_agent.PROVIDERS:
+    if config.HARNESS not in email_agent.PROVIDERS:
         raise TelegramConfigError(
-            "FITLIT_EMAIL_AGENT_PROVIDER is not a supported provider"
+            "HARNESS is not a supported headless harness"
         )
     if not provider_installed():
         raise TelegramConfigError(
@@ -2180,7 +2210,7 @@ def _validate_agent_settings() -> None:
         )
     if not model_valid():
         raise TelegramConfigError(
-            "FITLIT_TELEGRAM_COPILOT_MODEL has an invalid format"
+            "the configured Telegram harness model has an invalid format"
         )
     if not effort_valid():
         raise TelegramConfigError(
@@ -2347,7 +2377,7 @@ def status() -> int:
         "quarantined_updates": quarantined,
         "context_policy": "complete-active-conversation",
         "poll_seconds": config.TELEGRAM_POLL_TIMEOUT_SECONDS,
-        "provider": config.EMAIL_AGENT_PROVIDER,
+        "harness": config.HARNESS,
         "provider_installed": provider_installed(),
         "model": email_agent.selected_model(_telegram_model()),
         "model_valid": model_valid(),
