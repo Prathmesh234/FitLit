@@ -74,10 +74,11 @@ isolated provider request, local session state, logs, and generated artifacts
 live in a mode-`0700` temporary directory and are deleted immediately after
 Gmail delivery or failure.
 
-Copilot is the default harness, using `gpt-5.6-sol` at `high` reasoning effort.
-Its run has an isolated `COPILOT_HOME`, no remote export, no MCP servers, no
-custom instructions, and only the `view` tool inside the temporary request
-directory. Codex and Claude adapters can be selected through `.env`. The
+`HARNESS` selects Copilot, Codex, Claude, or OpenCode for every model-backed
+workflow. Copilot is the default, using `gpt-5.6-sol` at `high` reasoning
+effort. Every conversational run has an isolated private workspace, explicit
+read-only tools, the local transcript-memory MCP server, and at most two
+first-level native subagents for genuinely complex analysis. The
 composed request is written as a single JSON file that is adaptively kept under
 `FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES` (18,000 by default, below the 20,480
 byte hard refusal of the headless reader) by first narrowing the evidence tier
@@ -112,7 +113,7 @@ FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_SUBJECT_PREFIX=FitLit Ask:
 FITLIT_GMAIL_INBOX_DAILY_MAX=20
 FITLIT_GMAIL_INBOX_BATCH_MAX=5
-FITLIT_EMAIL_AGENT_PROVIDER=copilot
+HARNESS=copilot
 FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
@@ -135,7 +136,7 @@ interval, the simplest private setup is the Gmail-only listener:
 ```ini
 FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_POLL_SECONDS=5
-FITLIT_EMAIL_AGENT_PROVIDER=copilot
+HARNESS=copilot
 FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 ```
@@ -288,10 +289,10 @@ Official references:
 
    This writes `GMAIL_INBOX_REFRESH_TOKEN`; then set
    `FITLIT_GMAIL_INBOX_ENABLED=true`. Install and authenticate the selected
-   command provider, then configure it:
+   headless harness, then configure it:
 
    ```ini
-   FITLIT_EMAIL_AGENT_PROVIDER=copilot
+   HARNESS=copilot
    FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
    FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
    FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
@@ -320,27 +321,28 @@ match a strict object containing one short headline, at most three
 observations, and confidence from 0–1. Invalid, failed, unavailable, or timed-out
 providers are discarded and the original deterministic report is still sent.
 
-Supported CLI providers:
+Supported headless harnesses:
 
-| Provider | Noninteractive contract |
+| Harness | Noninteractive contract |
 |---|---|
-| GitHub Copilot CLI | `copilot --prompt ... --silent`, custom instructions/MCP/remote/tools disabled |
-| OpenAI Codex CLI | `codex exec --ephemeral --sandbox read-only --output-schema ...` |
-| Claude Code | `claude --bare --print --json-schema ... --tools "" --no-session-persistence` |
+| GitHub Copilot CLI | `copilot --prompt ... --silent`, explicit read-only tools and MCP |
+| OpenAI Codex CLI | `codex exec --strict-config --ephemeral --sandbox read-only --output-schema ...` |
+| Claude Code | `claude --bare --print --json-schema ... --no-session-persistence` |
+| OpenCode | `opencode run --format json` with a generated deny-first agent config |
 
 Configure in the ignored `.env`:
 
 ```ini
 FITLIT_AI_ENABLED=true
-FITLIT_AI_PROVIDER=auto
-FITLIT_AI_PROVIDER_ORDER=copilot,codex,claude
 FITLIT_AI_TIMEOUT_SECONDS=45
 ```
 
-`auto` tries installed providers in order. Authenticate the chosen CLI as its
-own documentation requires. Claude `--bare` requires API-key/provider
-credentials rather than the normal OAuth/keychain session. Provider credentials
-must stay outside source control.
+Proactive enrichment uses the same global `HARNESS`; it does not fall through
+to another provider after a failure. Authenticate the chosen CLI as its own
+documentation requires. Claude `--bare` requires API-key/provider credentials
+rather than the normal OAuth/keychain session. Harness credentials must stay
+outside source control. See
+[`HEADLESS_HARNESSES.md`](HEADLESS_HARNESSES.md).
 
 References:
 
