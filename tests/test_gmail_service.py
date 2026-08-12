@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import tempfile
 import unittest
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -287,6 +288,53 @@ class AIInsightTests(unittest.TestCase):
         self.assertEqual("", command[command.index("--tools") + 1])
         self.assertIn("--no-session-persistence", command)
         self.assertIn("--json-schema", command)
+
+    def test_opencode_adapter_uses_denied_tools_and_json_events(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with patch("fitlit.ai_insights._run", return_value="{}") as run:
+                ai_insights._opencode("prompt", root)
+            configured = json.loads((root / "opencode.json").read_text())
+        command = run.call_args.args[0]
+        self.assertEqual("run", command[1])
+        self.assertEqual("json", command[command.index("--format") + 1])
+        self.assertEqual("deny", configured["permission"]["*"])
+        self.assertNotIn("task", configured["permission"])
+
+    def test_opencode_event_stream_is_parsed(self) -> None:
+        payload = json.dumps({
+            "headline": "Useful pattern",
+            "observations": ["Steps increased by 12%."],
+            "confidence": 0.8,
+        })
+        raw = "\n".join([
+            json.dumps({"type": "step_start"}),
+            json.dumps({"type": "text", "part": {"text": payload}}),
+            json.dumps({"type": "step_finish"}),
+        ])
+        insight = ai_insights.parse_response(raw, "opencode")
+        self.assertEqual("Useful pattern", insight.headline)
+        self.assertEqual("opencode", insight.provider)
+
+    def test_global_harness_selects_proactive_provider(self) -> None:
+        payload = {
+            "headline": "Useful pattern",
+            "observations": ["Steps increased by 12%."],
+            "confidence": 0.8,
+        }
+        with (
+            patch("fitlit.config.AI_ENABLED", True),
+            patch("fitlit.config.HARNESS", "opencode"),
+            patch("fitlit.ai_insights.shutil.which", return_value="/bin/opencode"),
+            patch.dict(
+                ai_insights._ADAPTERS,
+                {"opencode": lambda prompt, cwd: json.dumps(payload)},
+                clear=False,
+            ),
+        ):
+            insight = ai_insights.generate({"steps": 12000})
+        self.assertIsNotNone(insight)
+        self.assertEqual("opencode", insight.provider)
 
 
 if __name__ == "__main__":
