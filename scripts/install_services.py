@@ -138,6 +138,7 @@ def render() -> list[Path]:
         str(uv.parent),
         str(home / ".local" / "bin"),
         str(home / ".cargo" / "bin"),
+        str(home / ".opencode" / "bin"),
         "/usr/local/sbin",
         "/usr/local/bin",
         "/usr/sbin",
