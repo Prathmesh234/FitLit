@@ -860,7 +860,7 @@ class InboxProcessingTests(unittest.TestCase):
                 )
             )
             stack.enter_context(
-                patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot")
+                patch("fitlit.config.HARNESS", "copilot")
             )
             stack.enter_context(
                 patch(
