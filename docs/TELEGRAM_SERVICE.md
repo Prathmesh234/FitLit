@@ -13,7 +13,8 @@ certificate.
 - Every trusted user/assistant turn is appended to owner-only
   `data/state/telegram-conversations.sqlite3`. Conversations are indexed and
   never deleted by bot commands. `/new` archives the active thread and creates
-  the next one; `/reset` is disabled.
+  the next one; `/reset` is disabled. SQLite FTS5 indexes active and archived
+  turns for the read-only `search_transcript_memory` MCP tool.
 - The selected provider receives the active conversation plus one compact
   `citable_evidence` map of exact `path: value` pairs selected from FitLit's
   grounded local summaries for the newest question. The request explicitly
@@ -44,9 +45,16 @@ certificate.
   artifact titles, labels, filenames, and bytes are rendered locally. Links,
   images, scripts, styles, forms, comments, processing instructions,
   attributes, embedded data, and remote resources are rejected.
-- Telegram overrides the shared Gmail model and uses GPT-5.6 Terra at high
-  reasoning effort by default. Provider request files, sessions, logs, and
-  generated artifacts remain temporary.
+- `HARNESS` selects Copilot, Codex, Claude, or OpenCode for Telegram and every
+  other model-backed workflow. With `HARNESS=copilot`, Telegram overrides the
+  Gmail model and uses GPT-5.6 Terra at high reasoning effort by default.
+  Harness request files, sessions, logs, MCP configuration, and generated
+  artifacts remain temporary.
+- The harness prompt advertises read-only transcript memory and native
+  subagents. Memory is used only when the owner refers to an earlier chat or
+  missing historical context; stored text is always untrusted data. For a
+  genuinely complex request, at most two first-level subagents may perform
+  narrow independent analysis before the parent synthesizes one reply.
 - Replies are plain text, chunked against Telegram's 4096 limit measured in
   **UTF-16 code units**, so astral emoji cost two units each and a chunk can
   never overflow. Paragraph, line, and word boundaries are preserved.
@@ -113,6 +121,7 @@ certificate.
 3. Put the token in private `.env` and confirm its permissions:
 
 ```ini
+HARNESS=copilot
 FITLIT_TELEGRAM_BOT_TOKEN=your-private-botfather-token
 FITLIT_TELEGRAM_COPILOT_MODEL=gpt-5.6-terra
 FITLIT_TELEGRAM_REASONING_EFFORT=high
@@ -142,7 +151,7 @@ no data and instead directs the user to `/new`. `/new` archives the current
 indexed conversation and starts a fresh thread with the current system prompt.
 `/help` reports that the channel is ready. Incoming media and documents are
 not downloaded. The bot refreshes Telegram's `typing` action while the
-headless provider is working, then sends the durable reply plan.
+headless harness is working, then sends the durable reply plan.
 
 HTML is designed for phones first: one vertical column, compact sections,
 short headings, and tables capped at three columns. The runtime uses the exact
@@ -176,15 +185,17 @@ Telegram API URLs. `status` reports `last_update_id`, `last_outcome`,
 `quarantined_updates`, and `provider_installed` / `model_valid` /
 `effort_valid`.
 
-The listener validates the headless provider, the Telegram model format, and
+The listener validates the headless harness, the Telegram model format, and
 the reasoning effort **before** polling starts, and exits `78` when any of them
 is invalid, so `RestartPreventExitStatus=78` stops a pointless restart loop. A
 `401` from `getUpdates` is the only status treated as a rejected token and also
 exits `78`; `403` is never assumed to mean a bad token, and `409` keeps its
 conflict warning and exponential backoff. Run
 `uv run python scripts/preflight.py` after changing
-`FITLIT_TELEGRAM_COPILOT_MODEL` or `FITLIT_TELEGRAM_REASONING_EFFORT`; it now
-reports `model_valid` and `effort_valid` too.
+`HARNESS`, its `FITLIT_TELEGRAM_<HARNESS>_MODEL`, or
+`FITLIT_TELEGRAM_REASONING_EFFORT`; it reports harness installation,
+transcript-memory indexing, `model_valid`, and `effort_valid`. See
+[`HEADLESS_HARNESSES.md`](HEADLESS_HARNESSES.md).
 
 To revoke access, use **@BotFather** to revoke the token, stop the service, and
 remove the three `FITLIT_TELEGRAM_*` identity/enabled values from `.env`.
