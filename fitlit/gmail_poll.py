@@ -26,11 +26,11 @@ def _validate_runtime() -> None:
     if not gmail_auth.is_inbox_configured():
         missing.append("Gmail inbox and send OAuth credentials")
     if (
-        config.EMAIL_AGENT_PROVIDER not in email_agent.PROVIDERS
-        or not shutil.which(config.EMAIL_AGENT_PROVIDER)
+        config.HARNESS not in email_agent.PROVIDERS
+        or not shutil.which(config.HARNESS)
     ):
         missing.append(
-            f"headless email provider {config.EMAIL_AGENT_PROVIDER!r}"
+            f"headless harness {config.HARNESS!r}"
         )
     if missing:
         raise GmailPollError("missing configuration: " + ", ".join(missing))
@@ -60,9 +60,9 @@ def run() -> None:
     signal.signal(signal.SIGINT, stop)
     log.info(
         "Gmail-only command listener started with a %d-second interval "
-        "using %s model %s at %s effort with %d-message context",
+        "using %s harness model %s at %s effort with %d-message context",
         config.GMAIL_INBOX_POLL_SECONDS,
-        config.EMAIL_AGENT_PROVIDER,
+        config.HARNESS,
         email_agent.selected_model() or "provider-default",
         config.EMAIL_AGENT_REASONING_EFFORT,
         config.EMAIL_AGENT_CONTEXT_MESSAGES,
@@ -77,7 +77,7 @@ def status() -> dict:
         "enabled": config.GMAIL_INBOX_ENABLED,
         "configured": gmail_auth.is_inbox_configured(),
         "poll_seconds": config.GMAIL_INBOX_POLL_SECONDS,
-        "provider": config.EMAIL_AGENT_PROVIDER,
+        "harness": config.HARNESS,
         "model": email_agent.selected_model() or None,
         "reasoning_effort": config.EMAIL_AGENT_REASONING_EFFORT,
         "context_messages": config.EMAIL_AGENT_CONTEXT_MESSAGES,
