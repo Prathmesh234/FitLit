@@ -1913,7 +1913,7 @@ class TelegramRunTests(unittest.TestCase):
                 ) as raised:
                     telegram_service.run(client)
             self.assertIn("effort", str(raised.exception))
-            with patch("fitlit.config.EMAIL_AGENT_PROVIDER", "gemini"):
+            with patch("fitlit.config.HARNESS", "gemini"):
                 with self.assertRaises(
                     telegram_service.TelegramConfigError
                 ):
@@ -1922,7 +1922,7 @@ class TelegramRunTests(unittest.TestCase):
     def test_validated_settings_match_the_provider_module_contract(
         self,
     ) -> None:
-        with patch("fitlit.config.EMAIL_AGENT_PROVIDER", "copilot"):
+        with patch("fitlit.config.HARNESS", "copilot"):
             with patch(
                 "fitlit.telegram_service.shutil.which",
                 return_value="/usr/bin/copilot",
@@ -1943,6 +1943,23 @@ class TelegramRunTests(unittest.TestCase):
                 "--dangerous flag",
             ):
                 self.assertFalse(telegram_service.model_valid())
+        with (
+            patch("fitlit.config.HARNESS", "opencode"),
+            patch(
+                "fitlit.config.TELEGRAM_OPENCODE_MODEL",
+                "anthropic/claude-sonnet-4-5",
+            ),
+            patch(
+                "fitlit.telegram_service.shutil.which",
+                return_value="/usr/bin/opencode",
+            ),
+        ):
+            self.assertTrue(telegram_service.provider_installed())
+            self.assertTrue(telegram_service.model_valid())
+            self.assertEqual(
+                "anthropic/claude-sonnet-4-5",
+                telegram_service._telegram_model(),
+            )
         with patch("fitlit.config.TELEGRAM_REASONING_EFFORT", "high"):
             self.assertTrue(telegram_service.effort_valid())
         with patch("fitlit.config.TELEGRAM_REASONING_EFFORT", "highest"):
