@@ -272,8 +272,19 @@ Alternative (cron-only, no API): a `@reboot` entry running
 | `PORT` / `HOST` | ✅ | Server bind |
 | `FITLIT_RUN_SCHEDULER` | ✅ | Run the scheduler in-process (default true) |
 | `FITLIT_TICK_SECONDS` | ✅ | Orchestrator tick (default 10) |
+| `HARNESS` | ✅ for model workflows | `copilot`, `codex`, `claude`, or `opencode`; default `copilot` |
 | `FITLIT_AI_ENABLED` | optional | Enable validated AI observations |
-| `FITLIT_AI_PROVIDER` | optional | `auto`, `copilot`, `codex`, or `claude` |
+| `FITLIT_EMAIL_AGENT_<HARNESS>_MODEL` | optional | Harness-specific Gmail/default model |
+| `FITLIT_TELEGRAM_<HARNESS>_MODEL` | optional | Harness-specific Telegram model |
+
+---
+
+Install and authenticate the selected CLI as the exact systemd service user.
+OpenCode installers commonly use `~/.opencode/bin`, which the generated units
+include in `PATH`. Run `uv run python scripts/preflight.py` before restart; it
+checks the global harness, installed binary, model syntax, and local
+transcript-memory FTS index. See
+[`HEADLESS_HARNESSES.md`](HEADLESS_HARNESSES.md).
 
 ---
 
