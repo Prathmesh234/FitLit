@@ -192,17 +192,24 @@ See [`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
 
 The first successful command thread becomes the only chain polled afterward.
 Only its latest five messages are exposed in-memory to the selected headless
-provider, with the newest user turn authoritative; unrelated mail and older
-thread content are excluded. Copilot is the default harness using GPT-5.6 Sol
-at high reasoning effort. It receives one compact query-filtered
+harness, with the newest user turn authoritative; unrelated mail and older
+thread content are excluded. The global `HARNESS` setting selects Copilot,
+Codex, Claude, or OpenCode for every model-backed workflow; Copilot remains the
+default, using GPT-5.6 Sol at high reasoning effort. It receives one compact
+query-filtered
 `citable_evidence` map of exact `path: value` pairs, produces natural
 conversational text, copies evidence keys verbatim for health claims, and
 requests artifact types when needed. The runtime appends exact path/value
 evidence and deterministically wraps a strictly validated semantic fragment in
 the fixed responsive FitLit theme, plus evidence-only XLSX, DOCX, HTML, or PNG
 artifacts.
-Temporary provider state and artifacts are deleted after delivery, and email
-bodies are never stored in SQLite.
+For complex work the selected harness may use at most two first-level native
+subagents. Every harness can also call a read-only SQLite FTS5 memory tool to
+search archived Telegram transcripts when the owner refers to an earlier chat.
+Temporary harness state and artifacts are deleted after delivery, and email
+bodies are never stored in SQLite. Configuration, authentication, delegation,
+and memory details are in
+[`docs/HEADLESS_HARNESSES.md`](docs/HEADLESS_HARNESSES.md).
 
 ### Private Telegram bot
 
@@ -214,14 +221,15 @@ conversations and supplies the active transcript with an explicit
 `**LATEST QUERY**` marker to the isolated headless provider, compacting only
 that provider view when the composed request would exceed the byte budget.
 `/new` archives the current thread without deleting it; `/reset` is disabled.
-Copilot still defaults to GPT-5.6 Sol at high reasoning effort, and
+Archived turns remain searchable through the read-only transcript-memory tool.
+The globally selected harness produces the response, and
 evidence-only XLSX, DOCX, safe themed HTML, and locally rendered PNG screenshot
 results can be delivered. Official Bot API long polling returns immediately on
 message arrival, while a typing heartbeat covers provider generation time; no
 WebSocket or public webhook is required for this single-user deployment.
-Telegram uses GPT-5.6 Terra at high reasoning effort independently from Gmail,
-plain text replies never depend on provider HTML, and any HTML artifact uses
-the same mobile-first FitLit email theme.
+With `HARNESS=copilot`, Telegram uses GPT-5.6 Terra at high reasoning effort
+independently from Gmail. Plain text replies never depend on harness HTML, and
+any HTML artifact uses the same mobile-first FitLit email theme.
 Setup, privacy boundaries, pairing, and operating commands are in
 [`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md).
 
