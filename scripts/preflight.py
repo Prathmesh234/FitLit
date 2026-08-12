@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import stat
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ TELEGRAM_TOKEN_PATTERN = re.compile(r"^\d{6,12}:[A-Za-z0-9_-]{30,}$")
 # preflight checks exactly what fitlit/email_agent.py accepts.
 MODEL_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
 REASONING_EFFORTS = ("low", "medium", "high", "xhigh", "max")
+HARNESSES = ("copilot", "codex", "claude", "opencode")
 
 
 def _dotenv() -> dict[str, str]:
@@ -49,12 +51,12 @@ def collect() -> dict:
     keys = set(dotenv) | set(os.environ)
     env_mode = stat.S_IMODE(ENV_PATH.stat().st_mode) if ENV_PATH.exists() else None
     providers = {
-        name: bool(shutil.which(name)) for name in ("copilot", "codex", "claude")
+        name: bool(shutil.which(name)) for name in HARNESSES
     }
-    email_provider = _value(
+    harness = _value(
         dotenv,
-        "FITLIT_EMAIL_AGENT_PROVIDER",
-        "copilot",
+        "HARNESS",
+        _value(dotenv, "FITLIT_EMAIL_AGENT_PROVIDER", "copilot"),
     ).lower()
     telegram_enabled = _enabled(dotenv, "FITLIT_TELEGRAM_ENABLED")
     telegram_token = _value(
@@ -65,11 +67,30 @@ def collect() -> dict:
         dotenv,
         "FITLIT_TELEGRAM_TRUSTED_USER_ID",
     )
+    email_model_names = {
+        "copilot": "FITLIT_EMAIL_AGENT_COPILOT_MODEL",
+        "codex": "FITLIT_EMAIL_AGENT_CODEX_MODEL",
+        "claude": "FITLIT_EMAIL_AGENT_CLAUDE_MODEL",
+        "opencode": "FITLIT_EMAIL_AGENT_OPENCODE_MODEL",
+    }
+    telegram_model_names = {
+        "copilot": "FITLIT_TELEGRAM_COPILOT_MODEL",
+        "codex": "FITLIT_TELEGRAM_CODEX_MODEL",
+        "claude": "FITLIT_TELEGRAM_CLAUDE_MODEL",
+        "opencode": "FITLIT_TELEGRAM_OPENCODE_MODEL",
+    }
+    email_defaults = {"copilot": "gpt-5.6-sol"}
+    telegram_defaults = {"copilot": "gpt-5.6-terra"}
+    email_model = _value(
+        dotenv,
+        email_model_names.get(harness, ""),
+        email_defaults.get(harness, ""),
+    ) if harness in HARNESSES else None
     telegram_model = _value(
         dotenv,
-        "FITLIT_TELEGRAM_COPILOT_MODEL",
-        "gpt-5.6-terra",
-    ) if email_provider == "copilot" else None
+        telegram_model_names.get(harness, ""),
+        telegram_defaults.get(harness, email_model or ""),
+    ) if harness in HARNESSES else None
     telegram_effort = _value(
         dotenv,
         "FITLIT_TELEGRAM_REASONING_EFFORT",
@@ -90,8 +111,24 @@ def collect() -> dict:
         telegram_user_valid,
         telegram_model_valid,
         telegram_effort_valid,
-        providers.get(email_provider, False),
+        providers.get(harness, False),
     ))
+    transcript_path = ROOT / "data" / "state" / "telegram-conversations.sqlite3"
+    memory_indexed = False
+    if transcript_path.is_file() and not transcript_path.is_symlink():
+        try:
+            with sqlite3.connect(
+                f"file:{transcript_path.resolve()}?mode=ro",
+                uri=True,
+            ) as connection:
+                memory_indexed = connection.execute(
+                    """
+                    SELECT 1 FROM sqlite_master
+                    WHERE type = 'table' AND name = 'turns_fts'
+                    """
+                ).fetchone() is not None
+        except sqlite3.Error:
+            memory_indexed = False
     return {
         "python": {
             "version": ".".join(map(str, sys.version_info[:3])),
@@ -108,6 +145,8 @@ def collect() -> dict:
         },
         "ai": {
             "enabled": _enabled(dotenv, "FITLIT_AI_ENABLED"),
+            "harness": harness,
+            "harness_supported": harness in HARNESSES,
             "providers_installed": providers,
         },
         "gmail_poll": {
@@ -118,13 +157,10 @@ def collect() -> dict:
                 "5",
             )),
             "email_agent": {
-                "provider": email_provider,
-                "provider_installed": providers.get(email_provider, False),
-                "model": _value(
-                    dotenv,
-                    "FITLIT_EMAIL_AGENT_COPILOT_MODEL",
-                    "gpt-5.6-sol",
-                ) if email_provider == "copilot" else None,
+                "harness": harness,
+                "harness_supported": harness in HARNESSES,
+                "provider_installed": providers.get(harness, False),
+                "model": email_model or None,
                 "reasoning_effort": _value(
                     dotenv,
                     "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
@@ -144,9 +180,13 @@ def collect() -> dict:
             "bot_token_format_valid": telegram_token_valid,
             "trusted_user_configured": telegram_user_configured,
             "trusted_user_valid": telegram_user_valid,
-            "provider_installed": providers.get(email_provider, False),
+            "harness": harness,
+            "harness_supported": harness in HARNESSES,
+            "provider_installed": providers.get(harness, False),
             "context_policy": "complete-active-conversation",
             "transcript_path": "data/state/telegram-conversations.sqlite3",
+            "memory_search_tool": "search_transcript_memory",
+            "memory_indexed": memory_indexed,
             "lock_path": "data/state/telegram-service.lock",
             "model": telegram_model,
             "model_valid": telegram_model_valid,
@@ -175,6 +215,7 @@ def main() -> int:
             not result["telegram"]["enabled"]
             or result["telegram"]["ready"]
         )
+        and result["ai"]["harness_supported"]
     )
     return 0 if required_ok else 1
 
