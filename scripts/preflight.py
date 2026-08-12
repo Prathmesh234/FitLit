@@ -81,15 +81,21 @@ def collect() -> dict:
     }
     email_defaults = {"copilot": "gpt-5.6-sol"}
     telegram_defaults = {"copilot": "gpt-5.6-terra"}
-    email_model = _value(
-        dotenv,
-        email_model_names.get(harness, ""),
-        email_defaults.get(harness, ""),
+    email_model = (
+        _value(
+            dotenv,
+            email_model_names.get(harness, ""),
+            email_defaults.get(harness, ""),
+        ).strip()
+        or None
     ) if harness in HARNESSES else None
-    telegram_model = _value(
-        dotenv,
-        telegram_model_names.get(harness, ""),
-        telegram_defaults.get(harness, email_model or ""),
+    telegram_model = (
+        _value(
+            dotenv,
+            telegram_model_names.get(harness, ""),
+            telegram_defaults.get(harness, email_model or ""),
+        ).strip()
+        or None
     ) if harness in HARNESSES else None
     telegram_effort = _value(
         dotenv,
