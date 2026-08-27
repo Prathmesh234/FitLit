@@ -284,7 +284,9 @@ class AIInsightTests(unittest.TestCase):
             with patch("fitlit.ai_insights._run", return_value="{}") as run:
                 ai_insights._claude("prompt", Path(directory))
         command = run.call_args.args[0]
-        self.assertIn("--bare", command)
+        # --bare never reads OAuth, so setting-source isolation replaces it.
+        self.assertNotIn("--bare", command)
+        self.assertEqual("", command[command.index("--setting-sources") + 1])
         self.assertEqual("", command[command.index("--tools") + 1])
         self.assertIn("--no-session-persistence", command)
         self.assertIn("--json-schema", command)

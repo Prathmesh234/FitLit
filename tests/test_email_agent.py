@@ -744,6 +744,15 @@ class EmailAgentProviderTests(unittest.TestCase):
                 email_agent._claude(root)
         command = run.call_args.args[0]
         self.assertIn("--no-session-persistence", command)
+        # --bare would refuse the operator's OAuth credentials, so isolation
+        # comes from loading no setting sources plus an explicit settings file.
+        self.assertNotIn("--bare", command)
+        self.assertEqual("", command[command.index("--setting-sources") + 1])
+        self.assertTrue(
+            command[command.index("--settings") + 1].endswith(
+                "claude-settings.json"
+            )
+        )
         tools = command[command.index("--tools") + 1]
         self.assertIn("Read", tools)
         self.assertIn("Agent", tools)
