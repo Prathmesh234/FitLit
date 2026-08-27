@@ -102,6 +102,18 @@ user, project, and local settings, hooks, and plugins out of the daemon run
 while leaving normal authentication intact. `ANTHROPIC_API_KEY` and
 Bedrock/Vertex/Foundry credentials still work if preferred.
 
+`--max-budget-usd` is omitted unless a positive cap is configured:
+
+```ini
+FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD=
+FITLIT_AI_CLAUDE_MAX_BUDGET_USD=
+```
+
+Claude reports cost at list price even on a subscription session, where no
+per-token charge is actually incurred. A cap therefore aborts the run — the CLI
+exits non-zero and the reply fails — without preventing real spend. Blank is
+the default; set a positive amount only when billing through an API key.
+
 Useful stable features:
 
 - mature custom and background subagents;
