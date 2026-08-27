@@ -272,7 +272,7 @@ Alternative (cron-only, no API): a `@reboot` entry running
 | `PORT` / `HOST` | ✅ | Server bind |
 | `FITLIT_RUN_SCHEDULER` | ✅ | Run the scheduler in-process (default true) |
 | `FITLIT_TICK_SECONDS` | ✅ | Orchestrator tick (default 10) |
-| `HARNESS` | ✅ for model workflows | `copilot`, `codex`, `claude`, or `opencode`; default `copilot` |
+| `HARNESS` | ✅ for model workflows | `claude`, `codex`, `copilot`, or `opencode`; default `claude` |
 | `FITLIT_AI_ENABLED` | optional | Enable validated AI observations |
 | `FITLIT_EMAIL_AGENT_<HARNESS>_MODEL` | optional | Harness-specific Gmail/default model |
 | `FITLIT_TELEGRAM_<HARNESS>_MODEL` | optional | Harness-specific Telegram model |

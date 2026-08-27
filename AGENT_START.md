@@ -1,7 +1,8 @@
 # FitLit agent start guide
 
-This is the public, provider-neutral runbook for GitHub Copilot CLI, OpenAI
-Codex CLI, Claude Code, or a human operator bootstrapping a fresh Linux clone.
+This is the public, provider-neutral runbook for Claude Code, OpenAI Codex
+CLI, GitHub Copilot CLI, or a human operator bootstrapping a fresh Linux
+clone.
 It intentionally contains no recipient, token, account identity, host name,
 health value, diet, location, or private coaching context.
 
@@ -111,13 +112,14 @@ webhook. Keep the existing 15-minute Gmail timer enabled as reconciliation.
 Configure the command-reply harness in `.env`:
 
 ```ini
-HARNESS=copilot
-FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+HARNESS=claude
+FITLIT_EMAIL_AGENT_CLAUDE_MODEL=claude-sonnet-5
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
 
-The global harness can be `copilot`, `codex`, `claude`, or `opencode`; it is
+The global harness can be `claude`, `codex`, `copilot`, or `opencode`, and
+defaults to `claude`; it is
 used by every Telegram, Gmail, artifact-drafting, and optional enrichment model
 call. Each conversational run has an isolated temporary workspace, a read-only
 transcript-memory MCP tool, and bounded native subagent delegation for complex
@@ -148,18 +150,20 @@ for proactive morning/evening/weekly reports remains optional and is off by
 default. Install and authenticate supported CLIs using their official
 instructions:
 
-- GitHub Copilot CLI: <https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli>
+- Claude Code: <https://code.claude.com/docs/en/setup>
 - OpenAI Codex CLI: <https://learn.chatgpt.com/docs/codex-cli>
-- Claude Code: <https://docs.anthropic.com/en/docs/claude-code/setup>
+- GitHub Copilot CLI: <https://docs.github.com/en/copilot/how-tos/set-up/install-copilot-cli>
 - OpenCode: <https://opencode.ai/docs/>
 
 Authentication choices:
 
-- Copilot: run `copilot login` if the CLI is not already authenticated.
+- Claude: run `claude login` once as the exact service user. FitLit invokes
+  plain `--print` with `--setting-sources ""`, so a normal subscription OAuth
+  login works; `ANTHROPIC_API_KEY` or Bedrock/Vertex/Foundry credentials are
+  also honoured. Do not add `--bare`: it never reads OAuth.
 - Codex: run `codex login`; on headless machines prefer
   `codex login --device-auth`. API-key automation may use `CODEX_API_KEY`.
-- Claude: FitLit invokes `--bare`, which requires `ANTHROPIC_API_KEY` or
-  configured Bedrock/Vertex/Foundry credentials.
+- Copilot: run `copilot login` if the CLI is not already authenticated.
 - OpenCode: run `opencode auth login` as the final service user or provide the
   selected model provider's API key.
 

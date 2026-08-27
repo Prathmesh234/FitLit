@@ -45,9 +45,10 @@ certificate.
   artifact titles, labels, filenames, and bytes are rendered locally. Links,
   images, scripts, styles, forms, comments, processing instructions,
   attributes, embedded data, and remote resources are rejected.
-- `HARNESS` selects Copilot, Codex, Claude, or OpenCode for Telegram and every
-  other model-backed workflow. With `HARNESS=copilot`, Telegram overrides the
-  Gmail model and uses GPT-5.6 Terra at high reasoning effort by default.
+- `HARNESS` selects Claude, Codex, Copilot, or OpenCode for Telegram and every
+  other model-backed workflow, and defaults to `claude`. Telegram keeps its own
+  model key, so it can override the Gmail model; both default to Sonnet 5 at
+  high reasoning effort.
   Harness request files, sessions, logs, MCP configuration, and generated
   artifacts remain temporary.
 - The harness prompt advertises read-only transcript memory and native
@@ -121,9 +122,9 @@ certificate.
 3. Put the token in private `.env` and confirm its permissions:
 
 ```ini
-HARNESS=copilot
+HARNESS=claude
 FITLIT_TELEGRAM_BOT_TOKEN=your-private-botfather-token
-FITLIT_TELEGRAM_COPILOT_MODEL=gpt-5.6-terra
+FITLIT_TELEGRAM_CLAUDE_MODEL=claude-sonnet-5
 FITLIT_TELEGRAM_REASONING_EFFORT=high
 ```
 

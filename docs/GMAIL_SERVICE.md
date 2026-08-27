@@ -74,9 +74,9 @@ isolated provider request, local session state, logs, and generated artifacts
 live in a mode-`0700` temporary directory and are deleted immediately after
 Gmail delivery or failure.
 
-`HARNESS` selects Copilot, Codex, Claude, or OpenCode for every model-backed
-workflow. Copilot is the default, using `gpt-5.6-sol` at `high` reasoning
-effort. Every conversational run has an isolated private workspace, explicit
+`HARNESS` selects Claude, Codex, Copilot, or OpenCode for every model-backed
+workflow. Claude Code is the default, using `claude-sonnet-5` at `high`
+reasoning effort. Every conversational run has an isolated private workspace, explicit
 read-only tools, the local transcript-memory MCP server, and at most two
 first-level native subagents for genuinely complex analysis. The
 composed request is written as a single JSON file that is adaptively kept under
@@ -113,8 +113,8 @@ FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_SUBJECT_PREFIX=FitLit Ask:
 FITLIT_GMAIL_INBOX_DAILY_MAX=20
 FITLIT_GMAIL_INBOX_BATCH_MAX=5
-HARNESS=copilot
-FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+HARNESS=claude
+FITLIT_EMAIL_AGENT_CLAUDE_MODEL=claude-sonnet-5
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
 ```
@@ -136,8 +136,8 @@ interval, the simplest private setup is the Gmail-only listener:
 ```ini
 FITLIT_GMAIL_INBOX_ENABLED=true
 FITLIT_GMAIL_INBOX_POLL_SECONDS=5
-HARNESS=copilot
-FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+HARNESS=claude
+FITLIT_EMAIL_AGENT_CLAUDE_MODEL=claude-sonnet-5
 FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
 ```
 
@@ -292,8 +292,8 @@ Official references:
    headless harness, then configure it:
 
    ```ini
-   HARNESS=copilot
-   FITLIT_EMAIL_AGENT_COPILOT_MODEL=gpt-5.6-sol
+   HARNESS=claude
+   FITLIT_EMAIL_AGENT_CLAUDE_MODEL=claude-sonnet-5
    FITLIT_EMAIL_AGENT_REASONING_EFFORT=high
    FITLIT_EMAIL_AGENT_CONTEXT_MESSAGES=5
    ```
@@ -325,9 +325,9 @@ Supported headless harnesses:
 
 | Harness | Noninteractive contract |
 |---|---|
-| GitHub Copilot CLI | `copilot --prompt ... --silent`, explicit read-only tools and MCP |
+| Claude Code | `claude --print --json-schema ... --setting-sources "" --no-session-persistence` |
 | OpenAI Codex CLI | `codex exec --strict-config --ephemeral --sandbox read-only --output-schema ...` |
-| Claude Code | `claude --bare --print --json-schema ... --no-session-persistence` |
+| GitHub Copilot CLI | `copilot --prompt ... --silent`, explicit read-only tools and MCP |
 | OpenCode | `opencode run --format json` with a generated deny-first agent config |
 
 Configure in the ignored `.env`:
@@ -339,17 +339,18 @@ FITLIT_AI_TIMEOUT_SECONDS=45
 
 Proactive enrichment uses the same global `HARNESS`; it does not fall through
 to another provider after a failure. Authenticate the chosen CLI as its own
-documentation requires. Claude `--bare` requires API-key/provider credentials
-rather than the normal OAuth/keychain session. Harness credentials must stay
+documentation requires. Claude runs without `--bare`, so a normal `claude
+login` subscription session works; `--bare` is deliberately avoided because it
+never reads OAuth. Setting-source isolation replaces what `--bare` suppressed. Harness credentials must stay
 outside source control. See
 [`HEADLESS_HARNESSES.md`](HEADLESS_HARNESSES.md).
 
 References:
 
-- <https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli>
+- <https://code.claude.com/docs/en/headless>
 - <https://learn.chatgpt.com/docs/non-interactive-mode>
 - <https://learn.chatgpt.com/docs/auth>
-- <https://docs.anthropic.com/en/docs/claude-code/sdk/sdk-headless>
+- <https://docs.github.com/en/copilot/concepts/agents/about-copilot-cli>
 
 ## Operation
 

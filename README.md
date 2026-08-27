@@ -193,9 +193,9 @@ See [`docs/GMAIL_SERVICE.md`](docs/GMAIL_SERVICE.md).
 The first successful command thread becomes the only chain polled afterward.
 Only its latest five messages are exposed in-memory to the selected headless
 harness, with the newest user turn authoritative; unrelated mail and older
-thread content are excluded. The global `HARNESS` setting selects Copilot,
-Codex, Claude, or OpenCode for every model-backed workflow; Copilot remains the
-default, using GPT-5.6 Sol at high reasoning effort. It receives one compact
+thread content are excluded. The global `HARNESS` setting selects Claude,
+Codex, Copilot, or OpenCode for every model-backed workflow; Claude Code is the
+default, using Sonnet 5 at high reasoning effort. It receives one compact
 query-filtered
 `citable_evidence` map of exact `path: value` pairs, produces natural
 conversational text, copies evidence keys verbatim for health claims, and
@@ -227,8 +227,8 @@ evidence-only XLSX, DOCX, safe themed HTML, and locally rendered PNG screenshot
 results can be delivered. Official Bot API long polling returns immediately on
 message arrival, while a typing heartbeat covers provider generation time; no
 WebSocket or public webhook is required for this single-user deployment.
-With `HARNESS=copilot`, Telegram uses GPT-5.6 Terra at high reasoning effort
-independently from Gmail. Plain text replies never depend on harness HTML, and
+Telegram's model is set independently from Gmail; both default to Sonnet 5 at
+high reasoning effort under `HARNESS=claude`. Plain text replies never depend on harness HTML, and
 any HTML artifact uses the same mobile-first FitLit email theme.
 Setup, privacy boundaries, pairing, and operating commands are in
 [`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md).
