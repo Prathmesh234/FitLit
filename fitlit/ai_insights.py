@@ -280,9 +280,13 @@ def _codex(prompt: str, cwd: Path) -> str:
 
 
 def _claude(prompt: str, cwd: Path) -> str:
+    settings_path = cwd / "claude-settings.json"
+    settings_path.write_text(
+        json.dumps({"hooks": {}, "enabledPlugins": {}}, separators=(",", ":"))
+    )
+    settings_path.chmod(0o600)
     command = [
         "claude",
-        "--bare",
         "--print",
         prompt,
         "--output-format",
@@ -293,6 +297,12 @@ def _claude(prompt: str, cwd: Path) -> str:
         "",
         "--permission-mode",
         "dontAsk",
+        # --bare is unusable here: it refuses OAuth and demands an API key.
+        # Loading no setting sources keeps user/project config out instead.
+        "--setting-sources",
+        "",
+        "--settings",
+        str(settings_path),
         "--disable-slash-commands",
         "--no-session-persistence",
         "--effort",
