@@ -1445,9 +1445,12 @@ def _claude(
         str(config.EMAIL_AGENT_MAX_TURNS),
         "--effort",
         reasoning_effort or config.EMAIL_AGENT_REASONING_EFFORT,
-        "--max-budget-usd",
-        config.EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD,
     ]
+    if config.EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD:
+        command.extend([
+            "--max-budget-usd",
+            config.EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD,
+        ])
     selected = model or config.EMAIL_AGENT_CLAUDE_MODEL
     if selected:
         command.extend(["--model", selected])

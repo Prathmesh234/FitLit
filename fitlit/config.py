@@ -71,6 +71,25 @@ def _env_optional_float(name: str) -> float | None:
     return float(value) if value else None
 
 
+def _env_budget(name: str) -> str:
+    """A positive dollar cap, or "" meaning the harness runs uncapped.
+
+    Claude Code reports cost at list price even on a subscription session,
+    where no per-token charge is actually incurred, so a cap can abort a reply
+    without preventing real spend. Blank disables the flag entirely; anything
+    unparseable or non-positive is treated as blank rather than passed through
+    to the CLI.
+    """
+    value = os.environ.get(name, "").strip()
+    if not value:
+        return ""
+    try:
+        amount = float(value)
+    except ValueError:
+        return ""
+    return value if amount > 0 else ""
+
+
 def _env_optional_int(name: str) -> int | None:
     value = os.environ.get(name, "").strip()
     return int(value) if value.isdecimal() else None
@@ -233,9 +252,9 @@ EMAIL_AGENT_MAX_SUBAGENTS = max(
     1,
     min(4, int(_env("FITLIT_EMAIL_AGENT_MAX_SUBAGENTS", "2"))),
 )
-EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env(
-    "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD",
-    "0.20",
+# Uncapped by default; set a positive dollar amount to reinstate a ceiling.
+EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD = _env_budget(
+    "FITLIT_EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD"
 )
 # Private Telegram bot. The official Bot API is polled outbound; only the exact
 # paired numeric user ID is accepted. Complete indexed conversations persist in
@@ -315,7 +334,7 @@ AI_REASONING_EFFORT = _env(
     "FITLIT_AI_REASONING_EFFORT",
     "medium",
 ).lower()
-AI_CLAUDE_MAX_BUDGET_USD = _env("FITLIT_AI_CLAUDE_MAX_BUDGET_USD", "0.05")
+AI_CLAUDE_MAX_BUDGET_USD = _env_budget("FITLIT_AI_CLAUDE_MAX_BUDGET_USD")
 
 # Optional private coaching profile. Keep real values in .env, never source.
 BODY_FAT_ESTIMATE_PCT = _env_optional_float("FITLIT_BODY_FAT_ESTIMATE_PCT")

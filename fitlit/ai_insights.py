@@ -307,9 +307,9 @@ def _claude(prompt: str, cwd: Path) -> str:
         "--no-session-persistence",
         "--effort",
         config.AI_REASONING_EFFORT,
-        "--max-budget-usd",
-        config.AI_CLAUDE_MAX_BUDGET_USD,
     ]
+    if config.AI_CLAUDE_MAX_BUDGET_USD:
+        command.extend(["--max-budget-usd", config.AI_CLAUDE_MAX_BUDGET_USD])
     if config.AI_CLAUDE_MODEL:
         command.extend(["--model", config.AI_CLAUDE_MODEL])
     return _run(command, cwd)
