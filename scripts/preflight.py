@@ -56,7 +56,7 @@ def collect() -> dict:
     harness = _value(
         dotenv,
         "HARNESS",
-        _value(dotenv, "FITLIT_EMAIL_AGENT_PROVIDER", "copilot"),
+        _value(dotenv, "FITLIT_EMAIL_AGENT_PROVIDER", "claude"),
     ).lower()
     telegram_enabled = _enabled(dotenv, "FITLIT_TELEGRAM_ENABLED")
     telegram_token = _value(
@@ -79,8 +79,8 @@ def collect() -> dict:
         "claude": "FITLIT_TELEGRAM_CLAUDE_MODEL",
         "opencode": "FITLIT_TELEGRAM_OPENCODE_MODEL",
     }
-    email_defaults = {"copilot": "gpt-5.6-sol"}
-    telegram_defaults = {"copilot": "gpt-5.6-terra"}
+    email_defaults = {"claude": "claude-sonnet-5", "copilot": "gpt-5.6-sol"}
+    telegram_defaults = {"claude": "claude-sonnet-5", "copilot": "gpt-5.6-terra"}
     email_model = (
         _value(
             dotenv,
