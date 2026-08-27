@@ -81,7 +81,7 @@ def _env_optional_int(name: str) -> int | None:
 HARNESSES = ("copilot", "codex", "claude", "opencode")
 HARNESS = _env(
     "HARNESS",
-    _env("FITLIT_EMAIL_AGENT_PROVIDER", "copilot"),
+    _env("FITLIT_EMAIL_AGENT_PROVIDER", "claude"),
 ).lower()
 
 
@@ -189,8 +189,9 @@ EMAIL_AGENT_MAX_INPUT_BYTES = max(
     20_000,
     min(500_000, int(_env("FITLIT_EMAIL_AGENT_MAX_INPUT_BYTES", "100000"))),
 )
-# Headless Copilot refuses to read a request file at or above 20,480 bytes, so
-# the composed provider request is adaptively built under this smaller budget.
+# Inherited from headless Copilot, which refuses to read a request file at or
+# above 20,480 bytes. Retained as a conservative shared ceiling so one composed
+# request stays valid on every harness; raise it if Copilot is retired.
 EMAIL_AGENT_REQUEST_BUDGET_BYTES = max(
     8_000,
     min(20_479, int(_env("FITLIT_EMAIL_AGENT_REQUEST_BUDGET_BYTES", "18000"))),
@@ -215,7 +216,10 @@ EMAIL_AGENT_COPILOT_MODEL = _env(
     "gpt-5.6-sol",
 )
 EMAIL_AGENT_CODEX_MODEL = _env("FITLIT_EMAIL_AGENT_CODEX_MODEL", "")
-EMAIL_AGENT_CLAUDE_MODEL = _env("FITLIT_EMAIL_AGENT_CLAUDE_MODEL", "")
+EMAIL_AGENT_CLAUDE_MODEL = _env(
+    "FITLIT_EMAIL_AGENT_CLAUDE_MODEL",
+    "claude-sonnet-5",
+)
 EMAIL_AGENT_OPENCODE_MODEL = _env("FITLIT_EMAIL_AGENT_OPENCODE_MODEL", "")
 EMAIL_AGENT_REASONING_EFFORT = _env(
     "FITLIT_EMAIL_AGENT_REASONING_EFFORT",
