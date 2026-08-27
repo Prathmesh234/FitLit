@@ -291,6 +291,25 @@ class AIInsightTests(unittest.TestCase):
         self.assertIn("--no-session-persistence", command)
         self.assertIn("--json-schema", command)
 
+    def test_claude_enrichment_budget_cap_is_optional(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with patch("fitlit.config.AI_CLAUDE_MAX_BUDGET_USD", ""):
+                with patch(
+                    "fitlit.ai_insights._run", return_value="{}"
+                ) as run:
+                    ai_insights._claude("prompt", Path(directory))
+            self.assertNotIn("--max-budget-usd", run.call_args.args[0])
+            with patch("fitlit.config.AI_CLAUDE_MAX_BUDGET_USD", "0.75"):
+                with patch(
+                    "fitlit.ai_insights._run", return_value="{}"
+                ) as run:
+                    ai_insights._claude("prompt", Path(directory))
+            command = run.call_args.args[0]
+            self.assertEqual(
+                "0.75",
+                command[command.index("--max-budget-usd") + 1],
+            )
+
     def test_opencode_adapter_uses_denied_tools_and_json_events(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

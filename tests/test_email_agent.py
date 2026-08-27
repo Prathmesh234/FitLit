@@ -765,6 +765,55 @@ class EmailAgentProviderTests(unittest.TestCase):
             command[command.index("--effort") + 1],
         )
 
+    def test_budget_values_are_normalized_before_reaching_the_cli(self) -> None:
+        cases = {
+            "": "",
+            "   ": "",
+            "not-a-number": "",
+            "0": "",
+            "-1": "",
+            "0.20": "0.20",
+            "1.50": "1.50",
+        }
+        for raw, expected in cases.items():
+            with self.subTest(raw=raw):
+                with patch.dict(
+                    "os.environ",
+                    {"FITLIT_TEST_BUDGET": raw},
+                    clear=False,
+                ):
+                    self.assertEqual(
+                        expected,
+                        config._env_budget("FITLIT_TEST_BUDGET"),
+                    )
+
+    def test_claude_budget_cap_is_omitted_unless_configured(self) -> None:
+        # Claude reports cost at list price even on a subscription session, so
+        # an always-on cap aborts replies without preventing real spend.
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "work").mkdir()
+            with patch(
+                "fitlit.config.EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD", ""
+            ):
+                with patch(
+                    "fitlit.email_agent._run", return_value=response()
+                ) as run:
+                    email_agent._claude(root)
+            self.assertNotIn("--max-budget-usd", run.call_args.args[0])
+            with patch(
+                "fitlit.config.EMAIL_AGENT_CLAUDE_MAX_BUDGET_USD", "1.50"
+            ):
+                with patch(
+                    "fitlit.email_agent._run", return_value=response()
+                ) as run:
+                    email_agent._claude(root)
+            command = run.call_args.args[0]
+            self.assertEqual(
+                "1.50",
+                command[command.index("--max-budget-usd") + 1],
+            )
+
     def test_codex_uses_isolated_config_schema_memory_and_subagents(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
