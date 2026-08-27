@@ -742,16 +742,19 @@ class TelegramProcessingTests(unittest.TestCase):
                 drafted_turns.extend(turns)
                 self.assertIsNone(kwargs["context_limit"])
                 self.assertEqual("telegram", kwargs["channel"])
-                self.assertEqual("gpt-5.6-terra", kwargs["model"])
+                self.assertEqual("claude-sonnet-5", kwargs["model"])
                 self.assertEqual("high", kwargs["reasoning_effort"])
                 self.assertTrue(client.typing_started.wait(1))
                 yield reply
 
+            # Pin the harness so the asserted model key is not inherited from
+            # whichever harness the ambient .env happens to select.
             with (
                 patch("fitlit.config.TELEGRAM_TRUSTED_USER_ID", USER_ID),
+                patch("fitlit.config.HARNESS", "claude"),
                 patch(
-                    "fitlit.config.TELEGRAM_COPILOT_MODEL",
-                    "gpt-5.6-terra",
+                    "fitlit.config.TELEGRAM_CLAUDE_MODEL",
+                    "claude-sonnet-5",
                 ),
                 patch("fitlit.config.TELEGRAM_REASONING_EFFORT", "high"),
                 patch(
@@ -1888,7 +1891,16 @@ class TelegramRunTests(unittest.TestCase):
 
     def test_startup_validates_provider_model_and_effort(self) -> None:
         client = FakeClient()
-        with self._service():
+        # Pin the harness so validation is asserted against the configured
+        # model key rather than whichever harness the ambient .env selects.
+        with (
+            self._service(),
+            patch("fitlit.config.HARNESS", "claude"),
+            patch(
+                "fitlit.telegram_service.shutil.which",
+                return_value="/usr/bin/claude",
+            ),
+        ):
             with patch("fitlit.telegram_service.shutil.which", return_value=None):
                 with self.assertRaises(
                     telegram_service.TelegramConfigError
@@ -1896,7 +1908,7 @@ class TelegramRunTests(unittest.TestCase):
                     telegram_service.run(client)
             self.assertIn("not installed", str(raised.exception))
             with patch(
-                "fitlit.config.TELEGRAM_COPILOT_MODEL",
+                "fitlit.config.TELEGRAM_CLAUDE_MODEL",
                 "not a valid model!",
             ):
                 with self.assertRaises(
