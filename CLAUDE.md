@@ -4,6 +4,10 @@ Claude Code entry point for this repository. FitLit's headless harness is
 Claude Code (`HARNESS=claude`), so these rules apply both to interactive work
 in this clone and to the daemon-invoked agent.
 
+FitLit is the owner's personal assistant. Wearable health is its deepest
+domain, not its boundary: `fitlit/` holds the health half, and `personal/`
+holds the scheduled personal tasks, their ledger, and their skills.
+
 ## Mandatory user rules
 
 @AGENTS.md
@@ -21,6 +25,7 @@ clone and is a no-op in a fresh one.
 - Deployment and systemd units: `docs/DEPLOYMENT.md`
 - Gmail and Telegram channels: `docs/GMAIL_SERVICE.md`,
   `docs/TELEGRAM_SERVICE.md`
+- Personal tasks, their ledger, and their timers: `docs/PERSONAL.md`
 
 Common commands:
 
@@ -28,21 +33,32 @@ Common commands:
 uv run python scripts/preflight.py
 uv run python -m pytest tests -q
 uv run python scripts/privacy_scan.py
+uv run python -m personal.runner status
 ```
 
 ## Hard constraints
 
 - Never print, commit, or summarize `.env`, OAuth tokens, Telegram credentials,
-  or private health rows.
+  private health rows, or rows from the personal ledger
+  (`data/state/personal.db`).
 - Keep the API bound to `127.0.0.1:8000`; it has no application auth.
 - Do not add `--bare` to the headless `claude` invocation: it refuses OAuth and
   requires `ANTHROPIC_API_KEY`. Isolation comes from `--setting-sources ""`
   plus the generated private settings file.
 
+- A personal task must never state a fact about the outside world — opening
+  hours, prices, availability, whether a place still exists — that it did not
+  fetch from the live web in that run. `personal/agent.py` grants WebSearch and
+  WebFetch and then verifies from the harness envelope that a search actually
+  happened; do not relax that check.
+
 ## Domain skills
 
-`.claude/skills/` holds the FitLit skills (`fitlit-overview`,
+`.claude/skills/` holds the health skills (`fitlit-overview`,
 `fitlit-activity`, `fitlit-sleep`, `fitlit-heart`, `fitlit-body`,
 `fitlit-nutrition`, `fitlit-workouts`, `fitlit-cardio-vitals`,
-`fitlit-logging-coaching`, `fitlit-sqlite-ops`). Prefer them over ad-hoc
-queries when answering health questions from this clone.
+`fitlit-logging-coaching`, `fitlit-sqlite-ops`) and, symlinked from
+`personal/skills/`, the personal ones (`personal-overview`,
+`personal-coffee`). Prefer them over ad-hoc queries: start at
+`fitlit-overview` for a health question and `personal-overview` for anything
+else the assistant does.

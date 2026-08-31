@@ -1,12 +1,14 @@
 # FitLit
 
-A cron-job based **Fitbit / Google Health API** data fetcher.
+A self-hosted **personal assistant**, built on a cron-job based
+**Fitbit / Google Health API** data fetcher.
 
-The goal of this project is to periodically (via a scheduled cron job) pull a
-user's wearable data from Fitbit and persist it for later analysis. Before
-writing any fetching code, we are in a **research stage**: cataloguing every
-single API endpoint that is available so we can decide what to fetch, how
-often, and under which scopes.
+FitLit periodically pulls the owner's wearable data from Fitbit and persists it
+for analysis, then answers questions about it over Gmail and a private Telegram
+bot. Wearable health is its deepest domain rather than its boundary: the
+[personal section](#the-personal-section) adds scheduled tasks that have nothing
+to do with fitness, sharing the same assistant, the same channels, and the same
+headless harness.
 
 ## Project status
 
@@ -19,6 +21,7 @@ often, and under which scopes.
 | 5. Pydantic models + SQLite persistence | ✅ done — see [Storage](#storage-pydantic--sqlite) below |
 | 6. Deploy + OAuth on a VM | ✅ done — portable systemd installer; see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) |
 | 7. Implement OAuth token refresh | ✅ done — [`fitlit/auth.py`](fitlit/auth.py), [`docs/DEPLOYMENT.md` §4](docs/DEPLOYMENT.md) |
+| 8. Personal (non-health) scheduled tasks | ✅ done — see [The personal section](#the-personal-section) below |
 
 ## The fetcher
 
@@ -232,6 +235,53 @@ high reasoning effort under `HARNESS=claude`. Plain text replies never depend on
 any HTML artifact uses the same mobile-first FitLit email theme.
 Setup, privacy boundaries, pairing, and operating commands are in
 [`docs/TELEGRAM_SERVICE.md`](docs/TELEGRAM_SERVICE.md).
+
+## The personal section
+
+`personal/` is the half of the assistant that is not about wearables:
+scheduled personal tasks, a durable ledger at `data/state/personal.db`, and the
+`personal-overview` / `personal-coffee` skills. It shares `.env`, the data
+directory, the Gmail sender, and the harness with `fitlit/`, but keeps its own
+ledger so a personal job can neither consume nor be throttled by the health
+send budget.
+
+The first task is a **daily coffee-shop recommendation**: every morning at 9:00
+AM Pacific, one email with a Seattle coffee shop to visit that day — roughly a
+15-minute drive from South Lake Union, quiet enough to sit and work in, and not
+one of the shops sent recently.
+
+What makes it trustworthy is that it refuses to answer from the model's memory.
+The task runs the harness with exactly `WebSearch` and `WebFetch`, asks for
+plain Google-style queries, and requires the shop's hours to be read off its own
+site or Google Business listing that morning. The result is then checked against
+rules a JSON schema cannot express: the harness envelope must show a search
+actually happened, `verified_date` must be today in Pacific, the shop must be
+open today, the sources must be at least two real URLs on two different hosts,
+the drive must be inside the ceiling, and the room must not be a loud one.
+Anything that fails is rejected and asked again.
+
+Duplicates are handled by a normalized shop key, so `Victrola Coffee Roasters`
+and `victrola coffee` are one shop. A repeat is retried; a repeat that survives
+every attempt is sent anyway and labeled with the date it was last suggested.
+
+The owner's verdict on a shop is recorded and honoured — `blocked` is a
+permanent exclusion applied before the model sees the request, and every other
+sentiment becomes standing taste guidance:
+
+```bash
+uv run python -m personal.runner run coffee --dry-run
+uv run python -m personal.runner feedback "Victrola Coffee" disliked --note "too loud"
+uv run python -m personal.runner history coffee
+```
+
+The conversational agent is given a read-only view of the ledger, so asking
+"where am I getting coffee today?" over Telegram reports the shop that was
+actually emailed rather than inventing a new one.
+
+Delivery is a systemd timer carrying `America/Los_Angeles`, so 9:00 AM stays
+9:00 AM across the PST/PDT change. Requires `HARNESS=claude`. Setup, the full
+constraint list, and how to add a task are in
+[`docs/PERSONAL.md`](docs/PERSONAL.md).
 
 ### Container
 

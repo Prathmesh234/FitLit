@@ -125,6 +125,24 @@ class RuntimePrivacyTests(unittest.TestCase):
             kinds,
         )
 
+    def test_privacy_scanner_ignores_systemd_templated_unit_names(self) -> None:
+        # "fitlit-personal@coffee.service" is shaped like an address; every
+        # personal task adds more references to one, so a false positive here
+        # would make the public-release gate permanently noisy.
+        findings = privacy_scan._scan_text(
+            "fixture",
+            "Unit=fitlit-personal@coffee.service\n"
+            "systemctl status fitlit-personal@errands.timer\n",
+        )
+        self.assertEqual([], findings)
+
+    def test_privacy_scanner_still_reports_a_real_address(self) -> None:
+        # Assembled rather than written out: a literal address here would be
+        # reported by the very scanner this file is testing.
+        address = "owner" + "@" + "somewhere.dev"
+        findings = privacy_scan._scan_text("fixture", f"{address}\n")
+        self.assertEqual(["fixture:1: email"], findings)
+
     def test_privacy_scanner_includes_untracked_public_files(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

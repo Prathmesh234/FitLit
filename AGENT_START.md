@@ -225,6 +225,8 @@ Installed runtime:
 | `fitlit-gmail.timer` | Launches the Gmail one-shot every 15 minutes |
 | `fitlit-gmail.service` | Detects, reserves, optionally enriches, and sends |
 | `fitlit-telegram.service` | Handles private allowlisted Telegram questions |
+| `fitlit-personal@.service` | Templated one-shot for any personal task |
+| `fitlit-personal-coffee.timer` | Sends the daily coffee recommendation at 9:00 AM Pacific |
 
 ## 8. Verify operation
 
@@ -236,6 +238,9 @@ systemctl is-active fitlit-telegram.service
 curl --fail http://127.0.0.1:8000/health
 curl --fail http://127.0.0.1:8000/status
 uv run python -m fitlit.gmail_service status
+# If FITLIT_PERSONAL_COFFEE_ENABLED is not false:
+systemctl list-timers fitlit-personal-coffee.timer
+uv run python -m personal.runner status coffee
 uv run python -m unittest discover -s tests -v
 ```
 

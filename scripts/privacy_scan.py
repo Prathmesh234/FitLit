@@ -29,6 +29,23 @@ SAFE_EMAILS = {
     "you@example.com",
     "noreply@anthropic.com",
 }
+# A systemd templated unit ("fitlit-personal@coffee.service") is shaped exactly
+# like an address, so the email pattern matches every reference to one in the
+# units, docs, and runbook. Recognise the suffix instead of adding each new
+# task's unit name to an allowlist.
+SYSTEMD_UNIT_SUFFIXES = (
+    ".service",
+    ".timer",
+    ".socket",
+    ".target",
+    ".mount",
+    ".path",
+    ".slice",
+    ".device",
+    ".swap",
+    ".automount",
+    ".scope",
+)
 
 
 def _git(*args: str) -> str:
@@ -52,6 +69,7 @@ def _scan_text(label: str, text: str) -> list[str]:
                     match for match in matches
                     if match.group(0).lower() not in SAFE_EMAILS
                     and not match.group(0).lower().endswith("@users.noreply.github.com")
+                    and not match.group(0).lower().endswith(SYSTEMD_UNIT_SUFFIXES)
                 ]
             if matches:
                 findings.append(f"{label}:{line_number}: {kind}")

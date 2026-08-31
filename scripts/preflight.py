@@ -46,6 +46,12 @@ def _enabled(dotenv: dict[str, str], name: str) -> bool:
     return _value(dotenv, name).lower() in ("1", "true", "yes", "on")
 
 
+def _enabled_default(dotenv: dict[str, str], name: str, default: bool) -> bool:
+    """Like `_enabled`, for flags whose absence means on rather than off."""
+    raw = _value(dotenv, name).strip()
+    return default if not raw else raw.lower() in ("1", "true", "yes", "on")
+
+
 def collect() -> dict:
     dotenv = _dotenv()
     keys = set(dotenv) | set(os.environ)
@@ -135,10 +141,52 @@ def collect() -> dict:
                 ).fetchone() is not None
         except sqlite3.Error:
             memory_indexed = False
+    coffee_enabled = _enabled_default(
+        dotenv, "FITLIT_PERSONAL_COFFEE_ENABLED", True
+    )
+    coffee_effort = _value(
+        dotenv, "FITLIT_PERSONAL_COFFEE_REASONING_EFFORT", "high"
+    ).lower()
+    coffee_model = _value(
+        dotenv, "FITLIT_PERSONAL_COFFEE_CLAUDE_MODEL", "claude-sonnet-5"
+    ).strip()
+    coffee_hour = _value(dotenv, "FITLIT_PERSONAL_COFFEE_SEND_HOUR", "9")
+    personal_db = ROOT / "data" / "state" / "personal.db"
+    # Personal tasks research on the live web through the harness. Only the
+    # Claude CLI is wired for that, so an otherwise valid harness still leaves
+    # the coffee timer unable to run.
+    coffee_ready = all((
+        harness == "claude",
+        providers.get("claude", False),
+        coffee_effort in REASONING_EFFORTS,
+        bool(MODEL_PATTERN.fullmatch(coffee_model)) if coffee_model else True,
+        coffee_hour.isdecimal() and 0 <= int(coffee_hour) <= 23,
+    ))
     return {
         "python": {
             "version": ".".join(map(str, sys.version_info[:3])),
             "supported": sys.version_info >= (3, 11),
+        },
+        "personal": {
+            "ledger_path": "data/state/personal.db",
+            "ledger_exists": personal_db.is_file(),
+            "tasks": {
+                "coffee": {
+                    "enabled": coffee_enabled,
+                    "ready": coffee_ready,
+                    "requires_harness": "claude",
+                    "harness": harness,
+                    "provider_installed": providers.get("claude", False),
+                    "web_tools": ["WebSearch", "WebFetch"],
+                    "send_hour_pacific": (
+                        int(coffee_hour) if coffee_hour.isdecimal() else None
+                    ),
+                    "model": coffee_model or None,
+                    "reasoning_effort": coffee_effort,
+                    "effort_valid": coffee_effort in REASONING_EFFORTS,
+                    "timer": "fitlit-personal-coffee.timer",
+                },
+            },
         },
         "uv": shutil.which("uv"),
         "env": {
@@ -222,6 +270,10 @@ def main() -> int:
             or result["telegram"]["ready"]
         )
         and result["ai"]["harness_supported"]
+        and (
+            not result["personal"]["tasks"]["coffee"]["enabled"]
+            or result["personal"]["tasks"]["coffee"]["ready"]
+        )
     )
     return 0 if required_ok else 1
 
