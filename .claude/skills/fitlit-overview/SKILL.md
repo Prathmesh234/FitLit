@@ -5,6 +5,11 @@ description: Read FIRST for any FitLit task. Explains what FitLit is, where the 
 
 # FitLit — orientation
 
+> FitLit is the user's **personal assistant**, and wearable health is its
+> deepest domain rather than its boundary. This skill and its siblings cover the
+> health half. For the rest — the scheduled personal tasks, their ledger, and
+> the daily coffee recommendation — read **`personal-overview`** instead.
+
 FitLit continuously pulls the user's **Fitbit / Google Health (v4)** data and
 stores it in local **SQLite** databases. Your job when these skills are active is
 to be the user's **personal fitness companion**: query their real data, aggregate
