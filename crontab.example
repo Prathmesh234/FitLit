@@ -13,3 +13,13 @@
 # If you'd rather not run a long-lived daemon, run a single dispatch tick every
 # minute instead (coarser than 10s, but pure cron). Comment out Option A and use:
 # * * * * * cd /absolute/path/to/FitLit && /usr/bin/env uv run python -m fitlit.orchestrator --once >> data/state/orchestrator.log 2>&1
+
+# --- Personal tasks (systemd timers are preferred; see docs/PERSONAL.md) -------
+# The shipped deployment uses deploy/fitlit-personal-coffee.timer, which carries
+# OnCalendar=*-*-* 09:00:00 America/Los_Angeles and therefore tracks the PST/PDT
+# change on its own. cron has no timezone field, so on a UTC host the hour below
+# must be corrected by hand twice a year (16:00 UTC = 9 AM PDT, 17:00 = 9 AM PST)
+# — or set CRON_TZ, which only some cron implementations honour.
+#
+# CRON_TZ=America/Los_Angeles
+# 0 9 * * * cd /absolute/path/to/FitLit && /usr/bin/env uv run python -m personal.runner run coffee >> data/state/personal.log 2>&1

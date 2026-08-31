@@ -1,0 +1,15 @@
+[Unit]
+Description=Send the daily Seattle coffee-shop recommendation at 9:00 AM Pacific
+
+[Timer]
+# Pacific, not UTC: the owner reads this at 9 AM local year-round, and systemd
+# tracks the PST/PDT change on its own.
+OnCalendar=*-*-* 09:00:00 America/Los_Angeles
+AccuracySec=1min
+RandomizedDelaySec=0
+# A machine that was asleep or rebooting at 9:00 still gets the day's email.
+Persistent=true
+Unit=fitlit-personal@coffee.service
+
+[Install]
+WantedBy=timers.target

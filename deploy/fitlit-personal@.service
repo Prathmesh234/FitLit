@@ -1,0 +1,20 @@
+[Unit]
+Description=FitLit personal task: %i
+Documentation=file://__FITLIT_ROOT__/docs/PERSONAL.md
+After=network-online.target fitlit.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__FITLIT_USER__
+WorkingDirectory=__FITLIT_ROOT__
+EnvironmentFile=-__FITLIT_ROOT__/.env
+Environment="PATH=__FITLIT_PATH__"
+UMask=0077
+# The task researches on the live web through the headless harness, so it needs
+# noticeably longer than the deterministic health jobs.
+TimeoutStartSec=1800
+ExecStart=__UV_PATH__ run python -m personal.runner run %i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full

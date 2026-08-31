@@ -17,11 +17,22 @@ RENDERED = ROOT / "data" / "state" / "systemd"
 SERVICE_NAMES = ("fitlit.service", "fitlit-gc.service", "fitlit-gmail.service")
 POLL_SERVICE_NAME = "fitlit-gmail-poll.service"
 TELEGRAM_SERVICE_NAME = "fitlit-telegram.service"
+# One templated unit backs every personal task; each task gets its own timer.
+PERSONAL_SERVICE_NAME = "fitlit-personal@.service"
+PERSONAL_TIMERS = {
+    "coffee": (
+        "fitlit-personal-coffee.timer",
+        "FITLIT_PERSONAL_COFFEE_ENABLED",
+        True,
+    ),
+}
 UNIT_NAMES = (
     *SERVICE_NAMES,
     POLL_SERVICE_NAME,
     TELEGRAM_SERVICE_NAME,
+    PERSONAL_SERVICE_NAME,
     "fitlit-gmail.timer",
+    *(timer for timer, _, _ in PERSONAL_TIMERS.values()),
 )
 LEGACY_UNIT_NAMES = (
     "fitlit-gmail-push.service",
@@ -53,7 +64,7 @@ def _find_uv(home: Path) -> Path:
     raise RuntimeError("uv was not found; install it before installing services")
 
 
-def _env_enabled(name: str) -> bool:
+def _env_enabled(name: str, default: bool = False) -> bool:
     value = os.environ.get(name)
     if value is None:
         env_path = ROOT / ".env"
@@ -63,7 +74,9 @@ def _env_enabled(name: str) -> bool:
                 if separator and key.strip() == name:
                     value = candidate.strip().strip('"').strip("'")
                     break
-    return str(value or "").lower() in ("1", "true", "yes", "on")
+    if value is None or not str(value).strip():
+        return default
+    return str(value).strip().lower() in ("1", "true", "yes", "on")
 
 
 def _env_value(name: str) -> str:
@@ -214,6 +227,16 @@ def install(outputs: list[Path], *, start: bool) -> None:
                 ["systemctl", "disable", "--now", POLL_SERVICE_NAME],
                 check=True,
             )
+        for task, (timer, flag, default) in PERSONAL_TIMERS.items():
+            if _env_enabled(flag, default):
+                enabled_units.append(timer)
+            else:
+                subprocess.run(["systemctl", "disable", "--now", timer], check=True)
+                print(
+                    f"note: personal task {task!r} is disabled; "
+                    f"{timer} left off",
+                    file=sys.stderr,
+                )
         if (
             _env_enabled("FITLIT_TELEGRAM_ENABLED")
             and _telegram_ready()
