@@ -1657,8 +1657,19 @@ class EmailAgentBudgetTests(unittest.TestCase):
         self.assertTrue(policy["complete_conversation_supplied"])
 
     def test_evidence_tier_is_reduced_before_context_is_dropped(self) -> None:
+        # Derived rather than hard-coded: the governing instructions are a
+        # fixed cost inside every request, so a budget pinned to a literal
+        # would silently change which behavior this exercises whenever the
+        # system prompt is edited. Leave exactly enough room above them for
+        # the three turns, and the tier must give way before any turn does.
+        budget = len(
+            json.dumps(
+                list(email_agent.system_instructions("telegram")),
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ) + 6_000
         with (
-            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", 11_000),
+            patch("fitlit.config.EMAIL_AGENT_REQUEST_BUDGET_BYTES", budget),
             patch(
                 "fitlit.email_agent.build_grounding",
                 return_value=snapshot(),
@@ -1676,7 +1687,7 @@ class EmailAgentBudgetTests(unittest.TestCase):
         self.assertEqual(3, policy["messages_supplied"])
         self.assertLessEqual(
             len(email_agent.encode_request(request).encode("utf-8")),
-            11_000,
+            budget,
         )
 
     def test_omission_keeps_the_most_recent_turns_that_still_fit(self) -> None:
