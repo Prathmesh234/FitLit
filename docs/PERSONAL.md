@@ -93,6 +93,16 @@ rather than model-speak, and requires reading the shop's own site or its Google
 Business listing before reporting an opening time. The queries it actually ran
 are stored in `payload_json.search_queries`, so a bad pick can be audited.
 
+### When a morning produces nothing
+
+If every attempt fails — a harness outage, a timeout, nothing verifiable — the
+task mails a short "no pick" notice instead of staying quiet, and records the
+day as `failed` so a later timer may retry it. Silence is ambiguous: an empty
+inbox looks the same whether the research failed or the timer was never
+installed at all, and that ambiguity is exactly how a broken deployment stays
+hidden for days. Set `FITLIT_PERSONAL_COFFEE_NOTIFY_ON_FAILURE=false` to turn
+it off. A notice that itself cannot be sent is logged, never raised.
+
 ### Duplicates
 
 Every shop inside the repeat window is listed in the prompt as an exclusion.
@@ -133,6 +143,10 @@ actually sent, pair hours with the date they were verified, and never invent a
 business, an address, or an opening time.
 
 ## Deployment
+
+Rendering the units is not installing them. `install_services.py` with no
+flags only writes them to `data/state/systemd/`; without `--install --start`
+the timer is never registered and nothing ever fires.
 
 ```bash
 uv run python scripts/preflight.py          # personal.tasks.coffee.ready must be true

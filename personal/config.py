@@ -65,6 +65,11 @@ COFFEE_NOISE_LEVELS = ("very quiet", "quiet", "moderate")
 # below keeps a stray manual run from mailing at an unexpected hour.
 COFFEE_SEND_HOUR = _env_int("FITLIT_PERSONAL_COFFEE_SEND_HOUR", 9, 0, 23)
 
+# A morning that produces nothing is indistinguishable from a morning where the
+# timer was never installed, which is how a broken deployment stays hidden.
+# Mail a short notice instead so silence always means "nothing ran at all".
+COFFEE_NOTIFY_ON_FAILURE = _env_bool("FITLIT_PERSONAL_COFFEE_NOTIFY_ON_FAILURE", True)
+
 # Harness settings. Web search is mandatory for this task, so the timeout is
 # generous compared with the deterministic health-insight calls.
 COFFEE_ATTEMPTS = _env_int("FITLIT_PERSONAL_COFFEE_ATTEMPTS", 3, 1, 5)

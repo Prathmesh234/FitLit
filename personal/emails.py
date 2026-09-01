@@ -225,3 +225,64 @@ def coffee_report(
         "Sources: " + (", ".join(sources) if sources else "—"),
     ])
     return Report(subject=subject, text="\n".join(plain), html=body)
+
+
+def coffee_failure_subject(day: date) -> str:
+    return f"Coffee today | no pick | {day.strftime('%a, %b %-d')}"
+
+
+def coffee_failure_report(day: date, reason: str, *, attempts: int) -> Report:
+    """A short notice for a morning that produced no recommendation.
+
+    Silence is ambiguous — it looks identical whether the research failed or
+    the timer was never installed at all. Saying so keeps a broken deployment
+    visible on the day it breaks.
+    """
+    subject = coffee_failure_subject(day)
+    detail = str(reason or "").strip() or "no reason was recorded"
+    body = f"""<!doctype html>
+<html><body style="margin:0;background:{PALETTE["paper"]};color:{PALETTE["ink"]}">
+<div style="max-width:620px;margin:0 auto;padding:26px 18px;font-family:Arial,sans-serif">
+  <div style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:{PALETTE["muted"]}">
+    Personal &middot; Coffee of the day
+  </div>
+  <h1 style="margin:6px 0 3px;font:normal 30px Georgia,serif;color:{PALETTE["ink"]}">
+    No pick this morning
+  </h1>
+  <div style="font-size:12px;color:{PALETTE["muted"]}">
+    {_e(day.strftime("%A, %B %-d, %Y"))} &middot; Pacific time
+  </div>
+  <div style="margin-top:16px;font:14px/1.55 Arial,sans-serif;color:{PALETTE["ink"]}">
+    FitLit could not verify a coffee shop it was willing to send after
+    {_e(attempts)} attempt(s). Rather than pass along hours it had not confirmed
+    on the live web, it sent nothing.
+  </div>
+  <div style="margin-top:14px;border-left:3px solid {PALETTE["crema"]};padding:9px 12px;
+              background:#f6ece0;font:13px Arial,sans-serif;color:{PALETTE["espresso"]}">
+    <strong>What happened:</strong> {_e(detail)}
+  </div>
+  <div style="margin-top:14px;font:13px/1.55 Arial,sans-serif;color:{PALETTE["muted"]}">
+    Retry by hand any time:<br>
+    <code style="font:12px monospace;color:{PALETTE["espresso"]}">uv&nbsp;run&nbsp;python&nbsp;-m&nbsp;personal.runner&nbsp;run&nbsp;coffee&nbsp;--force</code>
+  </div>
+  <div style="margin-top:20px;padding-top:12px;border-top:1px solid {PALETTE["line"]};
+              font-size:10px;color:{PALETTE["muted"]}">
+    FitLit &middot; personal assistant &middot; tomorrow's pick is unaffected
+  </div>
+</div></body></html>"""
+    plain = "\n".join([
+        "No pick this morning",
+        day.strftime("%A, %B %-d, %Y") + " · Pacific time",
+        "",
+        f"FitLit could not verify a coffee shop it was willing to send after "
+        f"{attempts} attempt(s). Rather than pass along hours it had not "
+        f"confirmed on the live web, it sent nothing.",
+        "",
+        f"What happened: {detail}",
+        "",
+        "Retry by hand any time:",
+        "  uv run python -m personal.runner run coffee --force",
+        "",
+        "Tomorrow's pick is unaffected.",
+    ])
+    return Report(subject=subject, text=plain, html=body)

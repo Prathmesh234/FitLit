@@ -304,10 +304,12 @@ class RecommendationTests(TemporaryLedger):
         self.assertEqual(2, result.attempts)
         self.assertIn("45-minute drive", calls[1])
 
-    def test_every_attempt_failing_records_a_failure_and_mails_nothing(self) -> None:
-        with patch("fitlit.gmail_client.send") as sender:
+    def test_every_attempt_failing_records_a_failure_and_mails_no_pick(self) -> None:
+        with patch("fitlit.gmail_client.send", return_value="notice-id") as sender:
             result, calls = self.run_with([FakeRun(good(open_today=False))])
-        sender.assert_not_called()
+        # Only the "no pick" notice goes out — never an unverified shop.
+        self.assertEqual(1, sender.call_count)
+        self.assertIn("no pick", sender.call_args[0][0])
         self.assertEqual("failed", result.status)
         self.assertEqual(config.COFFEE_ATTEMPTS, len(calls))
 
@@ -318,12 +320,47 @@ class RecommendationTests(TemporaryLedger):
         # A failed day may be retried by a later timer.
         self.assertTrue(store.reserve_run(connection, "coffee", DAY))
 
-    def test_a_harness_error_is_reported_not_raised(self) -> None:
+    def test_a_failed_morning_still_sends_a_notice(self) -> None:
+        sent = {}
+
+        def fake_send(subject, text, html, **options):
+            sent.update(subject=subject, text=text)
+            return "notice-id"
+
+        with patch("fitlit.gmail_client.send", side_effect=fake_send):
+            result, _ = self.run_with([FakeRun(good(open_today=False))])
+
+        self.assertEqual("failed", result.status)
+        self.assertTrue(result.notified)
+        self.assertIn("no pick", sent["subject"])
+        self.assertIn("not open today", sent["text"])
+
+    def test_the_failure_notice_can_be_turned_off(self) -> None:
+        with patch("personal.config.COFFEE_NOTIFY_ON_FAILURE", False):
+            with patch("fitlit.gmail_client.send") as sender:
+                result, _ = self.run_with([FakeRun(good(open_today=False))])
+        sender.assert_not_called()
+        self.assertFalse(result.notified)
+
+    def test_a_dry_run_never_sends_a_failure_notice(self) -> None:
         with patch("fitlit.gmail_client.send") as sender:
+            result, _ = self.run_with(
+                [FakeRun(good(open_today=False))], dry_run=True
+            )
+        sender.assert_not_called()
+        self.assertEqual("failed", result.status)
+
+    def test_a_notice_that_cannot_be_sent_does_not_raise(self) -> None:
+        with patch("fitlit.gmail_client.send", side_effect=RuntimeError("gmail down")):
+            result, _ = self.run_with([FakeRun(good(open_today=False))])
+        self.assertEqual("failed", result.status)
+        self.assertFalse(result.notified)
+
+    def test_a_harness_error_is_reported_not_raised(self) -> None:
+        with patch("fitlit.gmail_client.send", return_value="notice-id"):
             result, _ = self.run_with(
                 [agent.PersonalAgentError("claude timed out")]
             )
-        sender.assert_not_called()
         self.assertEqual("failed", result.status)
         self.assertIn("timed out", result.detail)
 
@@ -357,10 +394,10 @@ class RecommendationTests(TemporaryLedger):
         connection = store.connect()
         store.record_feedback(connection, "Eastlake Coffee + Cafe", "blocked")
         connection.close()
-        with patch("fitlit.gmail_client.send") as sender:
+        with patch("fitlit.gmail_client.send", return_value="notice-id") as sender:
             result, calls = self.run_with([FakeRun(good())])
-        sender.assert_not_called()
         self.assertEqual("failed", result.status)
+        self.assertIn("no pick", sender.call_args[0][0])
         self.assertIn("Eastlake Coffee + Cafe", calls[0])
 
 

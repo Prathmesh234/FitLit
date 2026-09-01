@@ -108,6 +108,7 @@ class CoffeeResult:
     web_searches: int = 0
     repeat_of_day: str | None = None
     detail: str | None = None
+    notified: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -420,6 +421,21 @@ def _recommend(
     )
 
 
+def _notify_failure(day: date, reason: str, attempts: int) -> bool:
+    """Mail a short notice so a failed morning is never silently empty."""
+    from fitlit import gmail_client
+
+    report = emails.coffee_failure_report(day, reason, attempts=attempts)
+    try:
+        gmail_client.send(
+            report.subject, report.text, report.html, category="personal-coffee"
+        )
+    except Exception as exc:  # noqa: BLE001 - the failure path must not raise
+        log.warning("could not send the coffee failure notice: %s", exc)
+        return False
+    return True
+
+
 def run(
     *,
     now: datetime | None = None,
@@ -453,12 +469,19 @@ def run(
                 day, connection, attempts=config.COFFEE_ATTEMPTS
             )
         except agent.PersonalAgentError as exc:
+            notified = False
             if not dry_run:
                 store.finish_run(
                     connection, TASK, day, "failed", detail=str(exc)[:400]
                 )
+                if send and config.COFFEE_NOTIFY_ON_FAILURE:
+                    notified = _notify_failure(day, str(exc), config.COFFEE_ATTEMPTS)
             return CoffeeResult(
-                status="failed", day=day.isoformat(), detail=str(exc)
+                status="failed",
+                day=day.isoformat(),
+                attempts=config.COFFEE_ATTEMPTS,
+                detail=str(exc),
+                notified=notified,
             )
 
         report = emails.coffee_report(shop, day, repeat_of_day=repeat_of)
